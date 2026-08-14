@@ -1,0 +1,82 @@
+# ==========================================
+# Ansible Playbook — Application Deployment
+# Pulls latest Docker image and deploys the app.
+# ==========================================
+# Usage: ansible-playbook -i inventory.ini playbook-deploy.yml
+
+---
+- name: Deploy Application
+  hosts: webservers
+  become: yes
+
+  vars:
+    app_dir: /opt/resume-intelligence
+    docker_image: "{{ hostvars[inventory_hostname]['docker_image'] | default('yourdockerhub/resume-intelligence:latest') }}"
+
+  tasks:
+    # ---------- PULL LATEST IMAGE ----------
+    - name: Pull latest Docker image
+      docker_image:
+        name: "{{ docker_image }}"
+        source: pull
+        force_source: yes
+      register: pull_result
+
+    - name: Show pull result
+      debug:
+        msg: "Image pulled: {{ pull_result.changed }}"
+
+    # ---------- STOP OLD CONTAINER ----------
+    - name: Stop existing container (if running)
+      docker_container:
+        name: resume-intelligence
+        state: absent
+      ignore_errors: yes
+
+    # ---------- START NEW CONTAINER ----------
+    - name: Start application container
+      docker_container:
+        name: resume-intelligence
+        image: "{{ docker_image }}"
+        state: started
+        restart_policy: unless-stopped
+        ports:
+          - "{{ app_port }}:8000"
+        volumes:
+          - "{{ app_dir }}/data:/app/backend/data"
+        env:
+          PYTHONUNBUFFERED: "1"
+        healthcheck:
+          test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+          interval: 30s
+          timeout: 10s
+          retries: 3
+          start_period: 60s
+
+    # ---------- HEALTH CHECK ----------
+    - name: Wait for application to start
+      uri:
+        url: "http://localhost:{{ app_port }}/api/health"
+        method: GET
+        status_code: 200
+      register: health
+      retries: 10
+      delay: 5
+      until: health.status == 200
+
+    # ---------- RELOAD NGINX ----------
+    - name: Reload Nginx
+      systemd:
+        name: nginx
+        state: reloaded
+
+    # ---------- DONE ----------
+    - name: Print deployment info
+      debug:
+        msg: |
+          ✅ Deployment complete!
+          🐳 Container: resume-intelligence
+          🌐 Image: {{ docker_image }}
+          📍 URL: http://{{ ansible_host }}
+          🔗 API Docs: http://{{ ansible_host }}/docs
+          💚 Health: {{ health.json.status | default('unknown') }}

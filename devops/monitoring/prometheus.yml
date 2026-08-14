@@ -1,0 +1,24 @@
+# ==========================================
+# Prometheus Configuration
+# Scrapes metrics from the FastAPI application
+# ==========================================
+
+global:
+  scrape_interval: 15s       # Collect metrics every 15 seconds
+  evaluation_interval: 15s   # Evaluate rules every 15 seconds
+
+scrape_configs:
+  # FastAPI application metrics
+  - job_name: "resume-intelligence"
+    static_configs:
+      - targets: ["app:8000"]
+        labels:
+          app: "resume-intelligence"
+          env: "production"
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  # Prometheus self-monitoring
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

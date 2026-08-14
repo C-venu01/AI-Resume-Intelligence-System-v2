@@ -1,0 +1,10 @@
+# Render.com deployment configuration
+# Automatically builds and deploys the Dockerfile in the repository.
+
+services:
+  - type: web
+    name: resume-intelligence
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    autoDeploy: true

@@ -1,0 +1,162 @@
+# ==========================================
+# Ansible Playbook — Server Setup
+# Provisions a fresh Ubuntu EC2 instance with
+# Docker, Nginx, firewall, and app directories.
+# ==========================================
+# Usage: ansible-playbook -i inventory.ini playbook-setup.yml
+
+---
+- name: Setup Application Server
+  hosts: webservers
+  become: yes  # Run as root
+
+  vars:
+    app_dir: /opt/resume-intelligence
+    nginx_domain: "{{ ansible_host }}"  # Use IP or set your domain
+
+  tasks:
+    # ---------- SYSTEM UPDATES ----------
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install system packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - ufw
+          - nginx
+          - python3-pip
+        state: present
+
+    # ---------- DOCKER INSTALLATION ----------
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+
+    - name: Install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+        update_cache: yes
+
+    - name: Start and enable Docker
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add ubuntu user to docker group
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+
+    # ---------- FIREWALL (UFW) ----------
+    - name: Configure UFW — allow SSH
+      ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+
+    - name: Configure UFW — allow HTTP
+      ufw:
+        rule: allow
+        port: "80"
+        proto: tcp
+
+    - name: Configure UFW — allow HTTPS
+      ufw:
+        rule: allow
+        port: "443"
+        proto: tcp
+
+    - name: Configure UFW — allow app port
+      ufw:
+        rule: allow
+        port: "{{ app_port }}"
+        proto: tcp
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+        policy: deny
+
+    # ---------- APP DIRECTORIES ----------
+    - name: Create application directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: "0755"
+
+    - name: Create data directory for SQLite
+      file:
+        path: "{{ app_dir }}/data"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: "0755"
+
+    # ---------- NGINX CONFIGURATION ----------
+    - name: Deploy Nginx configuration
+      template:
+        src: templates/nginx.conf.j2
+        dest: /etc/nginx/sites-available/resume-intelligence
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Enable Nginx site
+      file:
+        src: /etc/nginx/sites-available/resume-intelligence
+        dest: /etc/nginx/sites-enabled/resume-intelligence
+        state: link
+
+    - name: Remove default Nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Test Nginx configuration
+      command: nginx -t
+      register: nginx_test
+
+    - name: Restart Nginx
+      systemd:
+        name: nginx
+        state: restarted
+      when: nginx_test.rc == 0
+
+    - name: Enable Nginx on boot
+      systemd:
+        name: nginx
+        enabled: yes
+
+    # ---------- DONE ----------
+    - name: Print setup completion
+      debug:
+        msg: |
+          ✅ Server setup complete!
+          📍 App directory: {{ app_dir }}
+          🔒 Firewall: UFW enabled (22, 80, 443, {{ app_port }})
+          🐳 Docker: Installed and running
+          🌐 Nginx: Configured as reverse proxy
+          
+          Next step: Run playbook-deploy.yml to deploy the application.

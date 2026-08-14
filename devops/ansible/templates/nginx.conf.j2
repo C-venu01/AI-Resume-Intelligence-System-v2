@@ -1,0 +1,65 @@
+# ==========================================
+# Nginx Reverse Proxy Configuration
+# Jinja2 Template for Ansible
+# ==========================================
+
+# Upstream: FastAPI application
+upstream resume_app {
+    server 127.0.0.1:{{ app_port }};
+}
+
+server {
+    listen 80;
+    server_name {{ nginx_domain }};
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Gzip compression
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml;
+    gzip_min_length 256;
+
+    # Max upload size (for resume PDFs)
+    client_max_body_size 50M;
+
+    # Proxy all requests to FastAPI
+    location / {
+        proxy_pass http://resume_app;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket support (if needed in future)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Timeouts
+        proxy_read_timeout 120s;
+        proxy_connect_timeout 10s;
+    }
+
+    # Static files — cache for performance
+    location /static/ {
+        proxy_pass http://resume_app/static/;
+        expires 7d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Health check endpoint — no logging
+    location /api/health {
+        proxy_pass http://resume_app/api/health;
+        access_log off;
+    }
+
+    # Deny access to hidden files
+    location ~ /\. {
+        deny all;
+        return 404;
+    }
+}

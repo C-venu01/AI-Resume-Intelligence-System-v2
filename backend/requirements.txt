@@ -1,0 +1,24 @@
+# AI Resume Intelligence System 2.0 — Dependencies
+# Core API
+fastapi==0.135.1
+uvicorn[standard]>=0.34.0
+python-multipart>=0.0.18
+
+# PDF Processing
+PyMuPDF>=1.27.0
+
+# NLP
+spacy>=3.8.0
+
+# AI Embeddings
+sentence-transformers>=5.2.0
+torch>=2.0.0
+
+# Data Validation
+pydantic>=2.10.0
+
+# CORS
+python-dotenv>=1.0.0
+
+# Monitoring
+prometheus-fastapi-instrumentator>=7.0.0

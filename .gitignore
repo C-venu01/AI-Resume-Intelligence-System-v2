@@ -1,0 +1,46 @@
+# .gitignore for AI Resume Intelligence System 2.0
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+venv/
+env/
+.env
+
+# Database
+*.sqlite
+*.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+!variables.tf
+
+# Docker
+*.log
+
+# Sentence-transformers model cache
+.cache/
+
+# Uploaded resumes (don't commit user data)
+uploads/

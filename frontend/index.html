@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="AI Resume Intelligence System 2.0 — Cloud-Based Hiring Copilot. Analyze, match, and rank candidates using AI.">
+    <title>AI Resume Intelligence System 2.0 — Hiring Copilot</title>
+    <link rel="stylesheet" href="/static/index.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+</head>
+<body>
+    <div class="app-container">
+
+        <!-- ==================== HEADER ==================== -->
+        <header class="header">
+            <div class="header-brand">
+                <div class="header-logo">🤖</div>
+                <div>
+                    <h1 class="header-title">AI Resume Intelligence</h1>
+                    <p class="header-subtitle">Cloud-Based Hiring Copilot v2.0</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-secondary btn-sm" onclick="exportData('json')" id="export-json-btn">
+                    📥 Export JSON
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="exportData('csv')" id="export-csv-btn">
+                    📊 Export CSV
+                </button>
+                <button class="btn btn-danger btn-sm" onclick="clearAll()" id="clear-all-btn">
+                    🗑️ Clear All
+                </button>
+            </div>
+        </header>
+
+        <!-- ==================== NAVIGATION ==================== -->
+        <nav class="nav-tabs" id="main-nav">
+            <button class="nav-tab active" data-tab="dashboard" id="nav-dashboard">
+                <span class="tab-icon">📊</span> Dashboard
+            </button>
+            <button class="nav-tab" data-tab="upload" id="nav-upload">
+                <span class="tab-icon">📤</span> Upload
+            </button>
+            <button class="nav-tab" data-tab="candidates" id="nav-candidates">
+                <span class="tab-icon">👥</span> Candidates
+            </button>
+            <button class="nav-tab" data-tab="job-match" id="nav-job-match">
+                <span class="tab-icon">🎯</span> Job Match
+            </button>
+            <button class="nav-tab" data-tab="analytics" id="nav-analytics">
+                <span class="tab-icon">📈</span> Analytics
+            </button>
+        </nav>
+
+        <!-- ==================== DASHBOARD TAB ==================== -->
+        <div class="tab-content active" id="tab-dashboard">
+            <div class="stats-grid" id="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">👥</div>
+                    <div class="stat-value" id="stat-total">0</div>
+                    <div class="stat-label">Total Candidates</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">📈</div>
+                    <div class="stat-value" id="stat-avg-score">0</div>
+                    <div class="stat-label">Average Score</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">🏆</div>
+                    <div class="stat-value" id="stat-top-score">0</div>
+                    <div class="stat-label">Top Score</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">🎯</div>
+                    <div class="stat-value" id="stat-top-role">—</div>
+                    <div class="stat-label">Top Specialization</div>
+                </div>
+            </div>
+
+            <!-- Recent candidates preview -->
+            <div class="section-header">
+                <h2 class="section-title">🏆 Top Candidates</h2>
+            </div>
+            <div class="candidates-grid" id="dashboard-top-candidates"></div>
+            <div class="empty-state" id="dashboard-empty">
+                <div class="empty-state-icon">📋</div>
+                <div class="empty-state-title">No candidates yet</div>
+                <div class="empty-state-text">Upload resumes to start analyzing candidates</div>
+                <button class="btn btn-primary" style="margin-top:20px" onclick="switchTab('upload')" id="goto-upload-btn">
+                    📤 Upload Resumes
+                </button>
+            </div>
+        </div>
+
+        <!-- ==================== UPLOAD TAB ==================== -->
+        <div class="tab-content" id="tab-upload">
+            <div class="section-header">
+                <h2 class="section-title">📤 Upload Resumes</h2>
+            </div>
+
+            <div class="upload-zone" id="upload-zone">
+                <div class="upload-icon">📄</div>
+                <div class="upload-title">Drag & Drop Resume PDFs Here</div>
+                <div class="upload-subtitle">or click to browse files • PDF format only</div>
+                <div class="upload-btn-wrapper">
+                    <button class="btn btn-primary" id="browse-btn">Browse Files</button>
+                    <input type="file" id="file-input" multiple accept=".pdf">
+                </div>
+            </div>
+
+            <div class="file-list" id="file-list"></div>
+
+            <div class="progress-container" id="progress-container">
+                <div class="progress-bar-bg">
+                    <div class="progress-bar-fill" id="progress-bar"></div>
+                </div>
+                <div class="progress-text" id="progress-text">Analyzing...</div>
+            </div>
+
+            <div style="margin-top:20px; text-align:center;" id="analyze-wrapper" class="hidden">
+                <button class="btn btn-primary" onclick="analyzeFiles()" id="analyze-btn">
+                    🚀 Analyze All Resumes
+                </button>
+            </div>
+        </div>
+
+        <!-- ==================== CANDIDATES TAB ==================== -->
+        <div class="tab-content" id="tab-candidates">
+            <div class="section-header">
+                <h2 class="section-title">
+                    👥 All Candidates
+                    <span class="section-badge" id="candidates-count">0</span>
+                </h2>
+            </div>
+
+            <div class="candidates-toolbar">
+                <div class="search-input-wrapper">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" class="search-input" id="search-input"
+                           placeholder="Search by name, skills, or role...">
+                </div>
+                <select class="filter-select" id="filter-level">
+                    <option value="">All Levels</option>
+                    <option value="Fresher">Fresher</option>
+                    <option value="Junior">Junior</option>
+                    <option value="Mid-level">Mid-level</option>
+                    <option value="Senior">Senior</option>
+                    <option value="Principal">Principal</option>
+                </select>
+                <select class="filter-select" id="sort-by">
+                    <option value="overall_score">Sort by Score</option>
+                    <option value="experience_years">Sort by Experience</option>
+                    <option value="candidate_name">Sort by Name</option>
+                    <option value="created_at">Sort by Date</option>
+                </select>
+            </div>
+
+            <div class="candidates-grid" id="candidates-grid"></div>
+            <div class="empty-state" id="candidates-empty" style="display:none;">
+                <div class="empty-state-icon">👥</div>
+                <div class="empty-state-title">No candidates found</div>
+                <div class="empty-state-text">Upload resumes or adjust your search filters</div>
+            </div>
+        </div>
+
+        <!-- ==================== JOB MATCH TAB ==================== -->
+        <div class="tab-content" id="tab-job-match">
+            <div class="section-header">
+                <h2 class="section-title">🎯 AI Job Matching</h2>
+            </div>
+
+            <div class="job-match-container">
+                <div class="glass-card job-input-area">
+                    <div>
+                        <label class="input-label">Job Title</label>
+                        <input type="text" class="text-input" id="job-title"
+                               placeholder="e.g., Senior Python Developer">
+                    </div>
+                    <div>
+                        <label class="input-label">Job Description</label>
+                        <textarea class="text-input textarea" id="job-description"
+                                  placeholder="Paste the full job description here...&#10;&#10;Include: required skills, experience level, responsibilities, qualifications..."></textarea>
+                    </div>
+                    <button class="btn btn-primary" onclick="runJobMatch()" id="match-btn">
+                        🧠 Run AI Match
+                    </button>
+                </div>
+
+                <div>
+                    <div class="section-header">
+                        <h3 class="section-title" style="font-size:16px;">Match Results</h3>
+                    </div>
+                    <div class="match-results" id="match-results">
+                        <div class="empty-state" id="match-empty">
+                            <div class="empty-state-icon">🎯</div>
+                            <div class="empty-state-title">Enter a job description</div>
+                            <div class="empty-state-text">AI will semantically match candidates and identify skill gaps</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== ANALYTICS TAB ==================== -->
+        <div class="tab-content" id="tab-analytics">
+            <div class="section-header">
+                <h2 class="section-title">📈 Analytics</h2>
+            </div>
+
+            <div class="charts-grid">
+                <div class="chart-card">
+                    <h3 class="chart-title">🛠️ Top Technologies</h3>
+                    <canvas class="chart-canvas" id="chart-technologies"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h3 class="chart-title">📊 Score Distribution</h3>
+                    <canvas class="chart-canvas" id="chart-scores"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h3 class="chart-title">💼 Experience Levels</h3>
+                    <canvas class="chart-canvas" id="chart-experience"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h3 class="chart-title">🎯 Specializations</h3>
+                    <canvas class="chart-canvas" id="chart-specializations"></canvas>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ==================== LOADING OVERLAY ==================== -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="spinner"></div>
+        <div class="loading-text" id="loading-text">Processing...</div>
+    </div>
+
+    <!-- ==================== TOAST CONTAINER ==================== -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
