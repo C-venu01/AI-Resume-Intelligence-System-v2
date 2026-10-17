@@ -1,24 +1,38 @@
 # AI Resume Intelligence System 2.0 — Dependencies
+# Pinned versions for reproducible builds
+
 # Core API
-fastapi==0.135.1
-uvicorn[standard]>=0.34.0
-python-multipart>=0.0.18
+fastapi==0.115.12
+uvicorn[standard]==0.32.1
+python-multipart==0.0.20
 
 # PDF Processing
-PyMuPDF>=1.27.0
+PyMuPDF==1.25.5
 
 # NLP
-spacy>=3.8.0
+spacy==3.8.4
 
 # AI Embeddings
-sentence-transformers>=5.2.0
-torch>=2.0.0
+sentence-transformers==3.4.1
+torch==2.5.1
+transformers>=4.40.0,<5.0.0
+huggingface-hub>=0.23.0,<2.0.0
 
 # Data Validation
-pydantic>=2.10.0
+pydantic==2.10.6
+pydantic-settings==2.8.1
 
-# CORS
-python-dotenv>=1.0.0
+# Environment variables
+python-dotenv==1.0.1
+
+# Authentication & Security
+PyJWT==2.10.1
+passlib[bcrypt]==1.7.4
+
+# Optional: MIME type detection for uploads
+# Requires libmagic on the host system; skipped if unavailable
+python-magic==0.4.27; sys_platform != "win32"
+python-magic-bin==0.4.14; sys_platform == "win32"
 
 # Monitoring
-prometheus-fastapi-instrumentator>=7.0.0
+prometheus-fastapi-instrumentator==7.0.2

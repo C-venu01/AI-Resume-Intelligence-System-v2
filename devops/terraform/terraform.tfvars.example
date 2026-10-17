@@ -1,0 +1,57 @@
+# ==========================================
+# Terraform Variables — EXAMPLE FILE
+# ==========================================
+# Copy this to terraform.tfvars and fill in your values.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# terraform.tfvars is gitignored — NEVER commit real values.
+# ==========================================
+
+# ---------- GENERAL ----------
+project_name = "resume-intelligence"
+aws_region   = "ap-south-1"
+environment  = "production"
+
+# ---------- CRITICAL SECURITY SETTINGS ----------
+
+# SSH access — set to YOUR IP address only (find it: https://ifconfig.me)
+# NEVER use 0.0.0.0/0
+allowed_ssh_cidrs = [
+  "203.0.113.10/32",  # Replace with your actual IP
+]
+
+# Admin access for Prometheus/Grafana and debug port
+# Use your office IP, VPN CIDR, or bastion host
+allowed_admin_cidrs = [
+  "203.0.113.10/32",  # Replace with your actual IP
+]
+
+# ---------- DOMAIN & HTTPS ----------
+enable_https  = false
+domain_name   = ""   # e.g., "resume.example.com"
+acm_certificate_arn = ""  # Required if enable_https = true
+
+# ---------- MONITORING ----------
+enable_monitoring       = true
+grafana_admin_password  = ""   # SET THIS. Min 12 chars, mix of letters/numbers/symbols
+prometheus_retention_days = 15
+
+# ---------- APPLICATION SECRETS ----------
+
+# JWT secret — generate with: openssl rand -base64 32
+jwt_secret_key = ""
+
+# Admin password hash — generate with backend auth module:
+#   cd backend && python -c "from auth import hash_password; print(hash_password('YourPassword'))"
+admin_password_hash = ""
+
+# CORS — set to your actual frontend origin(s), comma-separated
+cors_origins = "https://your-frontend-domain.com"
+
+# ---------- INFRASTRUCTURE ----------
+instance_type = "t3.small"   # Minimum for the embedding model
+# ami_id = "ami-0f5ee92e2d63afc18"  # Ubuntu 22.04 ap-south-1
+
+# Docker image to deploy
+docker_image = "yourdockerhub/resume-intelligence:latest"

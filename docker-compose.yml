@@ -1,28 +1,55 @@
 # ==========================================
 # AI Resume Intelligence System 2.0
-# Docker Compose — Local Development
+# Docker Compose — Local Development / Single-Node Deployment
 # ==========================================
-
-version: "3.9"
+# Usage:
+#   cp .env.example .env   # then edit .env and set secrets
+#   docker compose up --build
+# ==========================================
 
 services:
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: resume-intelligence
+    # Bind to localhost only — Nginx (or a reverse proxy) fronts this.
+    # Use "0.0.0.0:8000:8000" ONLY if you are not running a proxy.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
-      # Persist SQLite database
-      - resume_data:/app/backend
+      # Persist ONLY the data directory — never mount over /app/backend,
+      # which would hide the application code inside the image.
+      - resume_data:/app/backend/data
+    env_file:
+      # Optional: copy .env.example to .env and fill in your secrets.
+      # `required: false` keeps `docker compose up` working without it.
+      - path: .env
+        required: false
     environment:
+      # Safe defaults; overridden by .env when present
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DATABASE_PATH=/app/backend/data/resume_db.sqlite
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
+    # Resource limits (Compose v2 supports these directly)
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2g
+        reservations:
+          memory: 512m
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 90s
+    # Graceful shutdown: give the app time to finish in-flight requests
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   resume_data:

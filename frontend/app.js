@@ -1,6 +1,6 @@
 /**
  * AI Resume Intelligence System 2.0 — Frontend Application
- * Handles: API calls, drag-drop upload, candidate display,
+ * Handles: Authentication, API calls, drag-drop upload, candidate display,
  * job matching, search/filter, charts, export, and animations.
  */
 
@@ -8,20 +8,177 @@
 const API_BASE = window.location.origin + '/api';
 let selectedFiles = [];
 let allCandidates = [];
+let authToken = null;
+let currentUser = null;
+
+// Token storage - use sessionStorage (cleared on browser close)
+// For better security, consider HttpOnly cookies set by backend
+const TOKEN_KEY = 'resume_intelligence_token';
+const USER_KEY = 'resume_intelligence_user';
 
 // ==================== INITIALIZATION ====================
 document.addEventListener('DOMContentLoaded', () => {
+    // Check for existing auth
+    loadAuthFromStorage();
+    updateAuthUI();
+
     initNavigation();
     initUploadZone();
     initSearchAndFilters();
-    loadDashboard();
+    initAuthForms();
+
+    // Load dashboard only if authenticated
+    if (isAuthenticated()) {
+        loadDashboard();
+    } else {
+        showLoginPrompt();
+    }
 });
 
+// ==================== AUTHENTICATION ====================
+
+function loadAuthFromStorage() {
+    try {
+        authToken = sessionStorage.getItem(TOKEN_KEY);
+        const userJson = sessionStorage.getItem(USER_KEY);
+        if (userJson) {
+            currentUser = JSON.parse(userJson);
+        }
+    } catch (e) {
+        console.error('Error loading auth from storage:', e);
+    }
+}
+
+function saveAuthToStorage(token, user) {
+    try {
+        sessionStorage.setItem(TOKEN_KEY, token);
+        sessionStorage.setItem(USER_KEY, JSON.stringify(user));
+        authToken = token;
+        currentUser = user;
+    } catch (e) {
+        console.error('Error saving auth to storage:', e);
+    }
+}
+
+function clearAuthFromStorage() {
+    try {
+        sessionStorage.removeItem(TOKEN_KEY);
+        sessionStorage.removeItem(USER_KEY);
+    } catch (e) {
+        console.error('Error clearing auth from storage:', e);
+    }
+    authToken = null;
+    currentUser = null;
+}
+
+function isAuthenticated() {
+    return authToken !== null;
+}
+
+function getAuthHeaders() {
+    if (!authToken) return {};
+    return {
+        'Authorization': `Bearer ${authToken}`,
+    };
+}
+
+async function handleLogin(username, password) {
+    try {
+        const response = await fetch(`${API_BASE}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || 'Login failed');
+        }
+
+        const data = await response.json();
+        saveAuthToStorage(data.access_token, data.user);
+        updateAuthUI();
+        showToast('Login successful!', 'success');
+        loadDashboard();
+        return true;
+    } catch (err) {
+        showToast(err.message, 'error');
+        return false;
+    }
+}
+
+async function handleLogout() {
+    clearAuthFromStorage();
+    updateAuthUI();
+    showLoginPrompt();
+    showToast('Logged out successfully', 'info');
+}
+
+function initAuthForms() {
+    const loginForm = document.getElementById('login-form');
+    const logoutBtn = document.getElementById('logout-btn');
+
+    if (loginForm) {
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('login-username').value;
+            const password = document.getElementById('login-password').value;
+            await handleLogin(username, password);
+        });
+    }
+
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', handleLogout);
+    }
+}
+
+function updateAuthUI() {
+    const loginSection = document.getElementById('login-section');
+    const userSection = document.getElementById('user-section');
+    const mainContent = document.getElementById('main-content');
+    const loginPrompt = document.getElementById('login-prompt');
+
+    if (isAuthenticated()) {
+        if (loginSection) loginSection.style.display = 'none';
+        if (userSection) {
+            userSection.style.display = 'flex';
+            const usernameEl = document.getElementById('current-username');
+            if (usernameEl && currentUser) {
+                usernameEl.textContent = currentUser.username || 'Admin';
+            }
+        }
+        if (mainContent) mainContent.style.display = 'block';
+        if (loginPrompt) loginPrompt.style.display = 'none';
+    } else {
+        if (loginSection) loginSection.style.display = 'flex';
+        if (userSection) userSection.style.display = 'none';
+        if (mainContent) mainContent.style.display = 'none';
+        if (loginPrompt) loginPrompt.style.display = 'flex';
+    }
+}
+
+function showLoginPrompt() {
+    const loginPrompt = document.getElementById('login-prompt');
+    if (loginPrompt) {
+        loginPrompt.style.display = 'flex';
+    }
+}
+
+function requireAuth() {
+    if (!isAuthenticated()) {
+        showLoginPrompt();
+        return false;
+    }
+    return true;
+}
+
 // ==================== NAVIGATION ====================
+
 function initNavigation() {
     const tabs = document.querySelectorAll('.nav-tab');
     tabs.forEach(tab => {
         tab.addEventListener('click', () => {
+            if (!requireAuth()) return;
             const tabName = tab.dataset.tab;
             switchTab(tabName);
         });
@@ -46,7 +203,10 @@ function switchTab(tabName) {
 }
 
 // ==================== DASHBOARD ====================
+
 async function loadDashboard() {
+    if (!requireAuth()) return;
+
     try {
         const stats = await apiGet('/stats');
         animateCounter('stat-total', stats.total_candidates || 0);
@@ -63,7 +223,7 @@ async function loadDashboard() {
         }
 
         // Load top candidates
-        const data = await apiGet('/candidates?sort_by=overall_score&sort_order=desc');
+        const data = await apiGet('/candidates?sort_by=overall_score&sort_order=desc&limit=3');
         const topCandidates = (data.candidates || []).slice(0, 3);
         const grid = document.getElementById('dashboard-top-candidates');
         const empty = document.getElementById('dashboard-empty');
@@ -79,6 +239,9 @@ async function loadDashboard() {
         }
     } catch (err) {
         console.error('Dashboard load error:', err);
+        if (err.message.includes('401')) {
+            handleLogout();
+        }
     }
 }
 
@@ -101,6 +264,7 @@ function animateCounter(elementId, target) {
 }
 
 // ==================== FILE UPLOAD ====================
+
 function initUploadZone() {
     const zone = document.getElementById('upload-zone');
     const fileInput = document.getElementById('file-input');
@@ -109,9 +273,13 @@ function initUploadZone() {
     // Click to browse
     browseBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+        if (!requireAuth()) return;
         fileInput.click();
     });
-    zone.addEventListener('click', () => fileInput.click());
+    zone.addEventListener('click', () => {
+        if (!requireAuth()) return;
+        fileInput.click();
+    });
 
     // File selection
     fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
@@ -125,6 +293,7 @@ function initUploadZone() {
     zone.addEventListener('drop', (e) => {
         e.preventDefault();
         zone.classList.remove('drag-over');
+        if (!requireAuth()) return;
         handleFiles(e.dataTransfer.files);
     });
 }
@@ -153,11 +322,22 @@ function renderFileList() {
     `).join('');
 }
 
+let uploadInProgress = false;
+
 async function analyzeFiles() {
+    if (!requireAuth()) return;
+
     if (selectedFiles.length === 0) {
         showToast('No files selected', 'error');
         return;
     }
+
+    if (uploadInProgress) {
+        showToast('Upload already in progress', 'error');
+        return;
+    }
+
+    uploadInProgress = true;
 
     const progressContainer = document.getElementById('progress-container');
     const progressBar = document.getElementById('progress-bar');
@@ -175,13 +355,23 @@ async function analyzeFiles() {
 
         const response = await fetch(`${API_BASE}/upload`, {
             method: 'POST',
+            headers: getAuthHeaders(),
             body: formData,
         });
+
+        if (response.status === 401) {
+            handleLogout();
+            throw new Error('Session expired. Please login again.');
+        }
 
         progressBar.style.width = '70%';
         progressText.textContent = 'Analyzing with AI...';
 
         const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.detail || 'Upload failed');
+        }
 
         progressBar.style.width = '100%';
         progressText.textContent = `✅ Done! ${result.success} analyzed, ${result.failed} failed`;
@@ -219,10 +409,13 @@ async function analyzeFiles() {
         hideLoading();
         showToast('Upload failed: ' + err.message, 'error');
         progressText.textContent = '❌ Error occurred';
+    } finally {
+        uploadInProgress = false;
     }
 }
 
 // ==================== CANDIDATES ====================
+
 function initSearchAndFilters() {
     const searchInput = document.getElementById('search-input');
     const filterLevel = document.getElementById('filter-level');
@@ -238,6 +431,8 @@ function initSearchAndFilters() {
 }
 
 async function loadCandidates() {
+    if (!requireAuth()) return;
+
     const search = document.getElementById('search-input').value;
     const level = document.getElementById('filter-level').value;
     const sortBy = document.getElementById('sort-by').value;
@@ -253,7 +448,7 @@ async function loadCandidates() {
         const empty = document.getElementById('candidates-empty');
         const countEl = document.getElementById('candidates-count');
 
-        countEl.textContent = allCandidates.length;
+        countEl.textContent = data.total || allCandidates.length;
 
         if (allCandidates.length > 0) {
             grid.innerHTML = allCandidates.map((c, i) => createCandidateCard(c, i + 1)).join('');
@@ -266,6 +461,9 @@ async function loadCandidates() {
         }
     } catch (err) {
         console.error('Load candidates error:', err);
+        if (err.message.includes('401')) {
+            handleLogout();
+        }
     }
 }
 
@@ -394,6 +592,8 @@ function drawScoreGauge(canvas, score, color) {
 }
 
 async function viewCandidate(id) {
+    if (!requireAuth()) return;
+
     try {
         const c = await apiGet(`/candidates/${id}`);
         const achievements = (c.notable_achievements || []).map(a => `<li style="margin-bottom:6px;font-size:13px;color:var(--text-secondary)">✅ ${escapeHtml(a)}</li>`).join('');
@@ -458,6 +658,8 @@ async function viewCandidate(id) {
 }
 
 async function deleteCandidate(id) {
+    if (!requireAuth()) return;
+
     if (!confirm('Delete this candidate?')) return;
     try {
         await apiDelete(`/candidates/${id}`);
@@ -465,12 +667,15 @@ async function deleteCandidate(id) {
         loadCandidates();
         loadDashboard();
     } catch (err) {
-        showToast('Delete failed', 'error');
+        showToast('Delete failed: ' + err.message, 'error');
     }
 }
 
 // ==================== JOB MATCHING ====================
+
 async function runJobMatch() {
+    if (!requireAuth()) return;
+
     const title = document.getElementById('job-title').value.trim();
     const desc = document.getElementById('job-description').value.trim();
 
@@ -552,7 +757,10 @@ function getMatchClass(score) {
 }
 
 // ==================== ANALYTICS ====================
+
 async function loadAnalytics() {
+    if (!requireAuth()) return;
+
     try {
         const stats = await apiGet('/stats');
         drawTechChart(stats.top_technologies || {});
@@ -680,7 +888,7 @@ async function drawScoreHistogram() {
     const ctx = canvas.getContext('2d');
 
     try {
-        const data = await apiGet('/candidates');
+        const data = await apiGet('/candidates?limit=200');
         const candidates = data.candidates || [];
 
         if (candidates.length === 0) return drawEmptyChart(ctx, canvas, 'No data');
@@ -749,9 +957,20 @@ function drawEmptyChart(ctx, canvas, message) {
 }
 
 // ==================== EXPORT ====================
+
 async function exportData(format) {
+    if (!requireAuth()) return;
+
     try {
-        const response = await fetch(`${API_BASE}/export/${format}`);
+        const response = await fetch(`${API_BASE}/export/${format}`, {
+            headers: getAuthHeaders(),
+        });
+
+        if (response.status === 401) {
+            handleLogout();
+            throw new Error('Session expired');
+        }
+
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -761,11 +980,13 @@ async function exportData(format) {
         URL.revokeObjectURL(url);
         showToast(`Exported as ${format.toUpperCase()}`, 'success');
     } catch (err) {
-        showToast('Export failed', 'error');
+        showToast('Export failed: ' + err.message, 'error');
     }
 }
 
 async function clearAll() {
+    if (!requireAuth()) return;
+
     if (!confirm('Delete ALL candidates? This cannot be undone.')) return;
     try {
         await apiDelete('/candidates');
@@ -773,23 +994,40 @@ async function clearAll() {
         loadDashboard();
         loadCandidates();
     } catch (err) {
-        showToast('Clear failed', 'error');
+        showToast('Clear failed: ' + err.message, 'error');
     }
 }
 
 // ==================== API HELPERS ====================
+
 async function apiGet(path) {
-    const res = await fetch(API_BASE + path);
-    if (!res.ok) throw new Error(`API Error: ${res.status}`);
+    const res = await fetch(API_BASE + path, {
+        headers: getAuthHeaders(),
+    });
+    if (res.status === 401) {
+        handleLogout();
+        throw new Error('Session expired. Please login again.');
+    }
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `API Error: ${res.status}`);
+    }
     return res.json();
 }
 
 async function apiPost(path, body) {
     const res = await fetch(API_BASE + path, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders(),
+        },
         body: JSON.stringify(body),
     });
+    if (res.status === 401) {
+        handleLogout();
+        throw new Error('Session expired. Please login again.');
+    }
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `API Error: ${res.status}`);
@@ -798,12 +1036,23 @@ async function apiPost(path, body) {
 }
 
 async function apiDelete(path) {
-    const res = await fetch(API_BASE + path, { method: 'DELETE' });
-    if (!res.ok) throw new Error(`API Error: ${res.status}`);
+    const res = await fetch(API_BASE + path, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+    });
+    if (res.status === 401) {
+        handleLogout();
+        throw new Error('Session expired. Please login again.');
+    }
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `API Error: ${res.status}`);
+    }
     return res.json();
 }
 
 // ==================== UI HELPERS ====================
+
 function showLoading(text = 'Processing...') {
     const overlay = document.getElementById('loading-overlay');
     const loadingText = document.getElementById('loading-text');

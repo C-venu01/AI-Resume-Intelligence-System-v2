@@ -4,25 +4,72 @@ Uses sentence-transformers to create embeddings and compute similarity.
 Also performs skill gap analysis and suggests learning resources.
 """
 
+import threading
 import numpy as np
 from typing import Dict, List, Tuple, Optional
 from sentence_transformers import SentenceTransformer
 
+from config import settings
+from logging_config import get_logger
+
+logger = get_logger(__name__)
+
 # ==================== MODEL LOADING ====================
 # all-MiniLM-L6-v2: fast, lightweight (~80MB), 384-dim vectors
 # Downloads automatically on first use, then cached locally
+#
+# Model is loaded once and cached for the process lifetime to avoid
+# repeated (expensive) reloads during requests. A lock guards the
+# lazy initialization against concurrent first-requests.
 
 _model: Optional[SentenceTransformer] = None
+_model_lock = threading.Lock()
+_model_load_error: Optional[str] = None
+
+
+class ModelUnavailableError(RuntimeError):
+    """Raised when the embedding model could not be loaded or used."""
 
 
 def _get_model() -> SentenceTransformer:
-    """Lazy-load the sentence-transformer model."""
-    global _model
-    if _model is None:
-        print("[Embedding Engine] Loading sentence-transformers model...")
-        _model = SentenceTransformer("all-MiniLM-L6-v2")
-        print("[Embedding Engine] Model loaded successfully.")
+    """
+    Lazy-load and cache the sentence-transformer model (thread-safe).
+
+    The model is loaded at most once per process. If loading fails, the
+    error is remembered so we fail fast on subsequent calls rather than
+    retrying an expensive download on every request.
+    """
+    global _model, _model_load_error
+
+    if _model is not None:
+        return _model
+
+    with _model_lock:
+        # Double-checked locking: another thread may have loaded it
+        if _model is not None:
+            return _model
+
+        if _model_load_error is not None:
+            raise ModelUnavailableError(_model_load_error)
+
+        try:
+            logger.info("Loading sentence-transformers model (first use)...")
+            _model = SentenceTransformer(settings.embedding_model)
+            logger.info("Embedding model loaded successfully.")
+        except Exception as e:
+            _model_load_error = (
+                "Embedding model is unavailable. It may not be installed or "
+                "downloaded yet."
+            )
+            logger.error(f"Failed to load embedding model: {type(e).__name__}")
+            raise ModelUnavailableError(_model_load_error) from e
+
     return _model
+
+
+def is_model_ready() -> bool:
+    """Check whether the embedding model is loaded (readiness probe)."""
+    return _model is not None
 
 
 # ==================== CORE MATCHING ====================
@@ -30,24 +77,41 @@ def _get_model() -> SentenceTransformer:
 def compute_job_match(resume_text: str, job_description: str) -> Dict:
     """
     Compute semantic similarity between resume and job description.
-    
+
+    The returned ``match_score`` is a *semantic similarity estimate* (0–100),
+    NOT a probability of hiring success or a measure of candidate quality.
+
     Args:
         resume_text: Full resume text.
         job_description: Job description text.
-    
+
     Returns:
-        Dictionary with match_score, skill_gaps, and suggestions.
+        Dictionary with match_score, skill_gaps, section_scores, and suggestions.
+
+    Raises:
+        ValueError: If either input is empty after stripping.
+        ModelUnavailableError: If the embedding model cannot be loaded.
     """
+    resume_text = (resume_text or "").strip()
+    job_description = (job_description or "").strip()
+
+    if not resume_text:
+        raise ValueError("Resume text is empty")
+    if not job_description:
+        raise ValueError("Job description is empty")
+
     model = _get_model()
 
-    # Encode both texts into vectors
+    # Encode both texts into vectors (single batched call = one model pass)
     embeddings = model.encode([resume_text, job_description])
     resume_vec = embeddings[0]
     jd_vec = embeddings[1]
 
-    # Cosine similarity
-    similarity = _cosine_similarity(resume_vec, jd_vec)
-    match_score = round(float(similarity) * 100, 1)  # 0-100%
+    # Cosine similarity, clamped to the valid [-1, 1] range before scaling.
+    # Real embeddings are typically non-negative, but we guard anyway so a
+    # degenerate vector can never produce a score outside 0–100.
+    similarity = max(-1.0, min(1.0, _cosine_similarity(resume_vec, jd_vec)))
+    match_score = round(max(0.0, similarity) * 100, 1)  # 0-100%
 
     # Skill gap analysis
     skill_gaps = _find_skill_gaps(resume_text, job_description)
@@ -70,28 +134,46 @@ def compute_job_match(resume_text: str, job_description: str) -> Dict:
 def rank_candidates_for_job(
     candidates: List[Dict],
     job_description: str,
+    model: Optional[SentenceTransformer] = None,
 ) -> List[Dict]:
     """
     Rank multiple candidates against a job description.
-    
+
+    Encodes the job description once, then encodes all candidate texts in a
+    single batched call — avoiding one model invocation per candidate.
+
     Args:
         candidates: List of candidate dictionaries (with resume_text or technologies).
         job_description: Job description text.
-    
+        model: Optional pre-loaded model (mainly for testing/injection).
+
     Returns:
         Candidates list sorted by match score (highest first).
+
+    Raises:
+        ValueError: If the job description is empty.
+        ModelUnavailableError: If the embedding model cannot be loaded.
     """
-    model = _get_model()
+    job_description = (job_description or "").strip()
+    if not job_description:
+        raise ValueError("Job description is empty")
+
+    if not candidates:
+        return []
+
+    model = model or _get_model()
+
+    # Encode JD once; encode all candidate texts in one batch.
     jd_embedding = model.encode([job_description])[0]
+    candidate_texts = [_build_candidate_text(c) for c in candidates]
+    candidate_embeddings = model.encode(candidate_texts)
 
     results = []
-    for candidate in candidates:
-        # Use candidate summary + technologies for matching
-        candidate_text = _build_candidate_text(candidate)
-        cand_embedding = model.encode([candidate_text])[0]
-
-        similarity = _cosine_similarity(cand_embedding, jd_embedding)
-        match_score = round(float(similarity) * 100, 1)
+    for candidate, candidate_text, cand_embedding in zip(
+        candidates, candidate_texts, candidate_embeddings
+    ):
+        similarity = max(-1.0, min(1.0, _cosine_similarity(cand_embedding, jd_embedding)))
+        match_score = round(max(0.0, similarity) * 100, 1)
 
         candidate_result = dict(candidate)
         candidate_result["job_match_score"] = match_score
@@ -104,7 +186,7 @@ def rank_candidates_for_job(
 
         results.append(candidate_result)
 
-    # Sort by match score descending
+    # Sort by match score descending; stable sort preserves original order on ties
     results.sort(key=lambda x: x["job_match_score"], reverse=True)
     return results
 

@@ -31,10 +31,24 @@ Thumbs.db
 
 # Terraform
 .terraform/
+.terraform.lock.hcl
 *.tfstate
-*.tfstate.backup
+*.tfstate.*
 *.tfvars
+*.tfvars.json
 !variables.tf
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Environment files — NEVER commit
+.env
+.env.*
+!.env.example
 
 # Docker
 *.log
