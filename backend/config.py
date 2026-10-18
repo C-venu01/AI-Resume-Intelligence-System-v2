@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     jwt_expiration_hours: int = 24
     admin_username: str = "admin"
     admin_password_hash: str = ""  # MUST be set in production
+    admin_password: str = ""
 
     # ==================== CORS ====================
     # Comma-separated list of allowed origins
@@ -123,8 +124,10 @@ class Settings(BaseSettings):
             if not self.jwt_secret_key:
                 issues.append("JWT_SECRET_KEY must be set in production")
 
-            if not self.admin_password_hash:
-                issues.append("ADMIN_PASSWORD_HASH must be set in production")
+            if not (self.admin_password_hash or self.admin_password):
+                issues.append(
+                    "ADMIN_PASSWORD_HASH or ADMIN_PASSWORD must be set in production"
+                )
 
             if not self.cors_origins:
                 issues.append("CORS_ORIGINS must be set in production (explicit allowed origins)")

@@ -1,7 +1,7 @@
 services:
   - type: web
     name: ai-resume-backend
-    env: python
+    runtime: python
     buildCommand: cd backend && pip install -r requirements.txt
     startCommand: cd backend && python main.py
     envVars:
@@ -9,7 +9,7 @@ services:
         value: production
       - key: JWT_SECRET_KEY
         generateValue: true
-      - key: ADMIN_PASSWORD_HASH
+      - key: ADMIN_PASSWORD
         generateValue: true
       - key: CORS_ORIGINS
         value: https://ai-resume-intelligence-system-v2.vercel.app
@@ -24,7 +24,4 @@ services:
       - key: PROMETHEUS_ENABLED
         value: "false"
     healthCheckPath: /api/health
-    instances: 1
-    memory: 512
     plan: free
-    diskSize: 1

@@ -29,6 +29,7 @@ JWT_EXPIRATION_HOURS = int(os.getenv("JWT_EXPIRATION_HOURS", "24"))
 # Admin credentials - MUST be set via environment variables in production
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -42,23 +43,28 @@ security = HTTPBearer(auto_error=False)
 def _init_admin_credentials():
     """
     Initialize admin credentials.
-    In production, password hash should be set via ADMIN_PASSWORD_HASH env var.
-    For development, we hash the default password.
+    Production can provide either a pre-hashed ADMIN_PASSWORD_HASH or a secret
+    ADMIN_PASSWORD, which is hashed before use. Development retains its fallback.
     """
     global ADMIN_PASSWORD_HASH
 
     if not ADMIN_PASSWORD_HASH:
-        # Development fallback: hash a default password
-        default_password = "admin123"
-        ADMIN_PASSWORD_HASH = pwd_context.hash(default_password)
-        print(f"[Auth] WARNING: Using default admin password '{default_password}'. Set ADMIN_PASSWORD_HASH for production!")
+        if ADMIN_PASSWORD:
+            ADMIN_PASSWORD_HASH = pwd_context.hash(ADMIN_PASSWORD)
+        else:
+            # Development fallback: hash a default password
+            default_password = "admin123"
+            ADMIN_PASSWORD_HASH = pwd_context.hash(default_password)
+            print(f"[Auth] WARNING: Using default admin password '{default_password}'. Set ADMIN_PASSWORD_HASH for production!")
 
     # Validate that we have required config
     if os.getenv("ENVIRONMENT", "development") == "production":
         if not os.getenv("JWT_SECRET_KEY"):
             raise RuntimeError("JWT_SECRET_KEY must be set in production environment!")
-        if not os.getenv("ADMIN_PASSWORD_HASH"):
-            raise RuntimeError("ADMIN_PASSWORD_HASH must be set in production environment!")
+        if not (os.getenv("ADMIN_PASSWORD_HASH") or ADMIN_PASSWORD):
+            raise RuntimeError(
+                "ADMIN_PASSWORD_HASH or ADMIN_PASSWORD must be set in production environment!"
+            )
 
 
 # Initialize on module import

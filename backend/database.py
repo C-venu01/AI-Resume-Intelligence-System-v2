@@ -103,6 +103,7 @@ def init_db():
                 phone TEXT,
                 linkedin TEXT,
                 experience_years INTEGER DEFAULT 0,
+                internship_experience_years INTEGER DEFAULT 0,
                 experience_level TEXT,
                 specialization TEXT,
                 technologies TEXT,          -- JSON array
@@ -116,6 +117,9 @@ def init_db():
                 candidate_summary TEXT,
                 filename TEXT,
                 resume_text TEXT,           -- Store full text for re-analysis
+                name_confidence REAL DEFAULT 0,
+                name_evidence TEXT,
+                experience_evidence TEXT,
                 created_at TEXT DEFAULT (datetime('now')),
                 updated_at TEXT DEFAULT (datetime('now'))
             );
@@ -153,6 +157,20 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_match_job
                 ON match_results(job_id);
         """)
+        existing_columns = {
+            row["name"] for row in cursor.execute("PRAGMA table_info(candidates)")
+        }
+        migrations = {
+            "internship_experience_years": "INTEGER DEFAULT 0",
+            "name_confidence": "REAL DEFAULT 0",
+            "name_evidence": "TEXT",
+            "experience_evidence": "TEXT",
+        }
+        for column, definition in migrations.items():
+            if column not in existing_columns:
+                cursor.execute(
+                    f"ALTER TABLE candidates ADD COLUMN {column} {definition}"
+                )
 
     logger.info(f"Database initialized at {DB_PATH}")
 
@@ -191,18 +209,21 @@ def save_candidate(data: Dict) -> int:
         cursor.execute("""
             INSERT INTO candidates (
                 candidate_name, email, phone, linkedin,
-                experience_years, experience_level, specialization,
+                experience_years, internship_experience_years,
+                experience_level, specialization,
                 technologies, certifications, soft_skills,
                 education, cgpa, projects_count,
                 notable_achievements, overall_score,
-                candidate_summary, filename, resume_text
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                candidate_summary, filename, resume_text,
+                name_confidence, name_evidence, experience_evidence
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            data.get("candidate_name", "Unknown"),
+            data.get("candidate_name", "Name not detected"),
             data.get("email", ""),
             data.get("phone", ""),
             data.get("linkedin", ""),
             data.get("experience_years", 0),
+            data.get("internship_experience_years", 0),
             data.get("experience_level", ""),
             data.get("specialization", ""),
             json.dumps(data.get("technologies", [])),
@@ -216,8 +237,43 @@ def save_candidate(data: Dict) -> int:
             data.get("candidate_summary", ""),
             data.get("filename", ""),
             data.get("resume_text", ""),
+            data.get("name_confidence", 0.0),
+            json.dumps(data.get("name_evidence", {})),
+            json.dumps(data.get("experience_evidence", [])),
         ))
         return cursor.lastrowid
+
+
+def update_candidate_reanalysis(candidate_id: int, data: Dict) -> bool:
+    """Update corrected parser results without changing the candidate ID."""
+    with db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE candidates
+            SET candidate_name = ?,
+                experience_years = ?,
+                internship_experience_years = ?,
+                experience_level = ?,
+                overall_score = ?,
+                candidate_summary = ?,
+                name_confidence = ?,
+                name_evidence = ?,
+                experience_evidence = ?,
+                updated_at = datetime('now')
+            WHERE id = ?
+        """, (
+            data.get("candidate_name", "Name not detected"),
+            data.get("experience_years", 0),
+            data.get("internship_experience_years", 0),
+            data.get("experience_level", "Not specified"),
+            data.get("overall_score", 0),
+            data.get("candidate_summary", ""),
+            data.get("name_confidence", 0.0),
+            json.dumps(data.get("name_evidence", {})),
+            json.dumps(data.get("experience_evidence", [])),
+            candidate_id,
+        ))
+        return cursor.rowcount > 0
 
 
 def get_all_candidates(
@@ -464,6 +520,9 @@ def _row_to_dict(row: sqlite3.Row, include_resume_text: bool = False) -> Dict:
     # Remove resume_text from responses unless explicitly requested (privacy)
     if not include_resume_text:
         d.pop("resume_text", None)
+    d.pop("name_confidence", None)
+    d.pop("name_evidence", None)
+    d.pop("experience_evidence", None)
 
     return d
 

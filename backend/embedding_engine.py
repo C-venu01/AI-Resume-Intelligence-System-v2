@@ -320,7 +320,7 @@ def _cosine_similarity(vec_a, vec_b) -> float:
     norm_b = np.linalg.norm(vec_b)
     if norm_a == 0 or norm_b == 0:
         return 0.0
-    return dot_product / (norm_a * norm_b)
+    return float(dot_product / (norm_a * norm_b))
 
 
 def _get_match_level(score: float) -> str:

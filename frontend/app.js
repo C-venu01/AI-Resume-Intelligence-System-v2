@@ -137,8 +137,10 @@ function updateAuthUI() {
     const userSection = document.getElementById('user-section');
     const mainContent = document.getElementById('main-content');
     const loginPrompt = document.getElementById('login-prompt');
+    const appContainer = document.querySelector('.app-container');
 
     if (isAuthenticated()) {
+        if (appContainer) appContainer.classList.remove('is-guest');
         if (loginSection) loginSection.style.display = 'none';
         if (userSection) {
             userSection.style.display = 'flex';
@@ -150,6 +152,7 @@ function updateAuthUI() {
         if (mainContent) mainContent.style.display = 'block';
         if (loginPrompt) loginPrompt.style.display = 'none';
     } else {
+        if (appContainer) appContainer.classList.add('is-guest');
         if (loginSection) loginSection.style.display = 'flex';
         if (userSection) userSection.style.display = 'none';
         if (mainContent) mainContent.style.display = 'none';
@@ -170,6 +173,26 @@ function requireAuth() {
         return false;
     }
     return true;
+}
+
+function candidateName(candidate) {
+    return typeof candidate.candidate_name === 'string' && candidate.candidate_name.trim()
+        ? candidate.candidate_name.trim()
+        : 'Name not detected';
+}
+
+function candidateExperience(candidate) {
+    const years = Number(candidate.experience_years) || 0;
+    const level = candidate.experience_level || 'Not specified';
+    const professional = years > 0
+        ? `${years} yr${years === 1 ? '' : 's'} professional experience`
+        : level === 'Fresher'
+            ? 'No professional experience'
+            : 'Professional experience not specified';
+    const internshipYears = Number(candidate.internship_experience_years) || 0;
+    return internshipYears > 0
+        ? `${professional} · ${internshipYears} yr${internshipYears === 1 ? '' : 's'} internship`
+        : professional;
 }
 
 // ==================== NAVIGATION ====================
@@ -316,7 +339,7 @@ function renderFileList() {
     const list = document.getElementById('file-list');
     list.innerHTML = selectedFiles.map(f => `
         <div class="file-item">
-            <span class="file-item-name">📄 ${f.name}</span>
+            <span class="file-item-name">${escapeHtml(f.name)}</span>
             <span class="file-item-status">${(f.size / 1024).toFixed(0)} KB</span>
         </div>
     `).join('');
@@ -374,7 +397,7 @@ async function analyzeFiles() {
         }
 
         progressBar.style.width = '100%';
-        progressText.textContent = `✅ Done! ${result.success} analyzed, ${result.failed} failed`;
+        progressText.textContent = `Done: ${result.success} analyzed, ${result.failed} failed`;
 
         hideLoading();
 
@@ -390,7 +413,7 @@ async function analyzeFiles() {
                 const label = analyzed ? `Score: ${analyzed.overall_score}` : (errored ? errored.error : 'Pending');
                 return `
                     <div class="file-item">
-                        <span class="file-item-name">📄 ${f.name}</span>
+                        <span class="file-item-name">${escapeHtml(f.name)}</span>
                         <span class="file-item-status ${status}">${label}</span>
                     </div>
                 `;
@@ -467,17 +490,45 @@ async function loadCandidates() {
     }
 }
 
+async function reprocessCandidates() {
+    if (!requireAuth()) return;
+    if (!confirm('Recheck saved resumes using the corrected name and experience parser? Candidate IDs will remain unchanged.')) {
+        return;
+    }
+
+    const button = document.getElementById('reprocess-candidates-btn');
+    if (button) button.disabled = true;
+    showLoading('Rechecking saved resumes...');
+
+    try {
+        const result = await apiPost('/candidates/reprocess', {});
+        const message = result.missing_source
+            ? `${result.updated} record(s) rechecked. ${result.missing_source} need a resume re-upload.`
+            : `${result.updated} saved resume(s) rechecked.`;
+        showToast(result.failed ? `${message} ${result.failed} could not be rechecked.` : message,
+            result.failed ? 'error' : 'success');
+        await loadCandidates();
+        await loadDashboard();
+    } catch (err) {
+        showToast('Could not recheck saved resumes: ' + err.message, 'error');
+    } finally {
+        hideLoading();
+        if (button) button.disabled = false;
+    }
+}
+
 function createCandidateCard(c, rank) {
-    const scoreColor = c.overall_score >= 80 ? '#48bb78' : c.overall_score >= 60 ? '#667eea' : c.overall_score >= 40 ? '#ed8936' : '#fc5c65';
+    const scoreColor = c.overall_score >= 80 ? '#d4d5d8' : c.overall_score >= 60 ? '#bfc0c4' : c.overall_score >= 40 ? '#999a9f' : '#77787e';
     const techs = (c.technologies || []).slice(0, 5);
     const certs = (c.certifications || []).slice(0, 2);
+    const name = candidateName(c);
 
     return `
         <div class="candidate-card" id="card-${c.id}">
             <div class="candidate-rank">${rank}</div>
             <div class="candidate-card-header">
                 <div class="candidate-info">
-                    <div class="candidate-name">${escapeHtml(c.candidate_name)}</div>
+                    <div class="candidate-name">${escapeHtml(name)}</div>
                     <div class="candidate-role">${escapeHtml(c.specialization || 'Software Developer')}</div>
                 </div>
                 <div class="candidate-score-gauge">
@@ -488,19 +539,19 @@ function createCandidateCard(c, rank) {
 
             <div class="candidate-details">
                 <div class="candidate-detail">
-                    <span class="candidate-detail-icon">💼</span>
-                    ${c.experience_years} yr(s) • ${c.experience_level}
+                    <span class="candidate-detail-icon">WORK</span>
+                    ${escapeHtml(candidateExperience(c))} · ${escapeHtml(c.experience_level || 'Not specified')}
                 </div>
                 <div class="candidate-detail">
-                    <span class="candidate-detail-icon">🎓</span>
+                    <span class="candidate-detail-icon">EDU</span>
                     ${escapeHtml(c.education || 'N/A')}
                 </div>
                 <div class="candidate-detail">
-                    <span class="candidate-detail-icon">📧</span>
+                    <span class="candidate-detail-icon">EMAIL</span>
                     ${escapeHtml(c.email || 'N/A')}
                 </div>
                 <div class="candidate-detail">
-                    <span class="candidate-detail-icon">📱</span>
+                    <span class="candidate-detail-icon">TEL</span>
                     ${escapeHtml(c.phone || 'N/A')}
                 </div>
             </div>
@@ -512,8 +563,8 @@ function createCandidateCard(c, rank) {
             </div>
 
             <div class="candidate-actions">
-                <button class="btn btn-secondary btn-sm" onclick="viewCandidate(${c.id})" id="view-${c.id}">👁️ Details</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteCandidate(${c.id})" id="delete-${c.id}">🗑️</button>
+                <button class="btn btn-secondary btn-sm" onclick="viewCandidate(${c.id})" id="view-${c.id}">Details</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteCandidate(${c.id})" id="delete-${c.id}" aria-label="Delete candidate">Delete</button>
             </div>
 
             ${c.job_match_score != null ? `
@@ -596,7 +647,8 @@ async function viewCandidate(id) {
 
     try {
         const c = await apiGet(`/candidates/${id}`);
-        const achievements = (c.notable_achievements || []).map(a => `<li style="margin-bottom:6px;font-size:13px;color:var(--text-secondary)">✅ ${escapeHtml(a)}</li>`).join('');
+        const name = candidateName(c);
+        const achievements = (c.notable_achievements || []).map(a => `<li style="margin-bottom:6px;font-size:13px;color:var(--text-secondary)">${escapeHtml(a)}</li>`).join('');
         const softSkills = (c.soft_skills || []).map(s => `<span class="tech-badge">${escapeHtml(s)}</span>`).join('');
 
         const modal = document.createElement('div');
@@ -607,46 +659,46 @@ async function viewCandidate(id) {
         modal.innerHTML = `
             <div class="glass-card" style="max-width:600px;width:90%;max-height:80vh;overflow-y:auto;cursor:default;" onclick="event.stopPropagation()">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-                    <h2 style="font-size:20px;font-weight:600;">${escapeHtml(c.candidate_name)}</h2>
+                    <h2 style="font-size:20px;font-weight:600;">${escapeHtml(name)}</h2>
                     <button class="btn btn-secondary btn-sm" onclick="this.closest('.loading-overlay').remove()">✕ Close</button>
                 </div>
-                <p style="color:var(--accent-cyan);font-size:14px;margin-bottom:16px;">${escapeHtml(c.specialization)} • ${c.experience_level} • ${c.experience_years} yr(s)</p>
+                <p style="color:var(--accent-cyan);font-size:14px;margin-bottom:16px;">${escapeHtml(c.specialization)} • ${escapeHtml(candidateExperience(c))}</p>
                 <div style="background:var(--bg-glass);padding:16px;border-radius:var(--radius-md);margin-bottom:16px;">
                     <p style="font-size:13px;color:var(--text-secondary);line-height:1.7;">${escapeHtml(c.candidate_summary)}</p>
                 </div>
                 <div style="margin-bottom:16px;">
-                    <strong style="font-size:14px;">📧</strong> ${escapeHtml(c.email)} &nbsp; <strong>📱</strong> ${escapeHtml(c.phone)}
-                    ${c.linkedin ? `<br><strong>🔗</strong> <a href="${escapeHtml(c.linkedin)}" target="_blank" style="color:var(--accent-blue);">${escapeHtml(c.linkedin)}</a>` : ''}
+                    <strong style="font-size:14px;">Contact</strong><br>${escapeHtml(c.email)} · ${escapeHtml(c.phone)}
+                    ${c.linkedin ? `<br><a href="${escapeHtml(c.linkedin)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent-blue);">${escapeHtml(c.linkedin)}</a>` : ''}
                 </div>
                 <div style="margin-bottom:16px;">
-                    <strong style="font-size:14px;">🎓 Education:</strong> ${escapeHtml(c.education)}
+                    <strong style="font-size:14px;">Education:</strong> ${escapeHtml(c.education)}
                     ${c.cgpa ? ` (CGPA: ${c.cgpa})` : ''}
                 </div>
                 <div style="margin-bottom:16px;">
-                    <strong style="font-size:14px;">🛠️ Technologies</strong>
+                    <strong style="font-size:14px;">Technologies</strong>
                     <div class="candidate-techs" style="margin-top:8px;">
                         ${(c.technologies || []).map(t => `<span class="tech-badge">${escapeHtml(t)}</span>`).join('')}
                     </div>
                 </div>
                 ${(c.certifications || []).length > 0 ? `
                 <div style="margin-bottom:16px;">
-                    <strong style="font-size:14px;">🏅 Certifications</strong>
+                    <strong style="font-size:14px;">Certifications</strong>
                     <div class="candidate-techs" style="margin-top:8px;">
                         ${c.certifications.map(t => `<span class="tech-badge cert">${escapeHtml(t)}</span>`).join('')}
                     </div>
                 </div>` : ''}
                 ${softSkills ? `
                 <div style="margin-bottom:16px;">
-                    <strong style="font-size:14px;">💡 Soft Skills</strong>
+                    <strong style="font-size:14px;">Strengths</strong>
                     <div class="candidate-techs" style="margin-top:8px;">${softSkills}</div>
                 </div>` : ''}
                 ${achievements ? `
                 <div style="margin-bottom:16px;">
-                    <strong style="font-size:14px;">🏆 Achievements</strong>
+                    <strong style="font-size:14px;">Achievements</strong>
                     <ul style="margin-top:8px;list-style:none;">${achievements}</ul>
                 </div>` : ''}
                 <div style="text-align:center;padding-top:16px;border-top:1px solid var(--border-glass);">
-                    <span style="font-size:32px;font-weight:800;background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">${c.overall_score}/100</span>
+                    <span style="font-size:32px;font-weight:600;color:var(--text-primary);">${c.overall_score}/100</span>
                     <p style="color:var(--text-secondary);font-size:13px;margin-top:4px;">Overall Score</p>
                 </div>
             </div>
@@ -700,7 +752,6 @@ async function runJobMatch() {
         if (candidates.length === 0) {
             container.innerHTML = `
                 <div class="empty-state">
-                    <div class="empty-state-icon">⚠️</div>
                     <div class="empty-state-title">No candidates to match</div>
                     <div class="empty-state-text">Upload resumes first</div>
                 </div>`;
@@ -711,7 +762,7 @@ async function runJobMatch() {
             <div class="match-result-card">
                 <div class="match-header">
                     <div>
-                        <strong style="font-size:15px;">#${i + 1} ${escapeHtml(c.candidate_name)}</strong>
+                        <strong style="font-size:15px;">#${i + 1} ${escapeHtml(candidateName(c))}</strong>
                         <span style="font-size:12px;color:var(--text-muted);margin-left:8px;">${escapeHtml(c.specialization)}</span>
                     </div>
                     <span class="match-score-badge ${getMatchClass(c.job_match_score)}">
@@ -719,7 +770,7 @@ async function runJobMatch() {
                     </span>
                 </div>
                 <p style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">
-                    Resume Score: ${c.overall_score}/100 • ${c.experience_years} yr(s) exp
+                    Resume Score: ${c.overall_score}/100 • ${escapeHtml(candidateExperience(c))}
                 </p>
                 ${c.skill_gaps && c.skill_gaps.length > 0 ? `
                     <div>
@@ -728,12 +779,12 @@ async function runJobMatch() {
                             ${c.skill_gaps.map(g => `<span class="gap-badge">${escapeHtml(g)}</span>`).join('')}
                         </div>
                     </div>
-                ` : '<p style="font-size:12px;color:var(--accent-green);">✅ No skill gaps detected</p>'}
+                ` : '<p style="font-size:12px;color:var(--text-secondary);">No skill gaps detected</p>'}
                 ${c.suggestions && c.suggestions.length > 0 ? `
                     <div class="suggestions-list">
                         ${c.suggestions.slice(0, 3).map(s => `
                             <div class="suggestion-item">
-                                <span class="suggestion-skill">📚 ${escapeHtml(s.skill)}:</span>
+                                <span class="suggestion-skill">${escapeHtml(s.skill)}:</span>
                                 <span class="suggestion-resource">${escapeHtml(s.resource)}</span>
                             </div>
                         `).join('')}
@@ -845,7 +896,7 @@ function drawPieChart(canvas, data) {
     const centerX = width / 3;
     const centerY = height / 2;
     const radius = Math.min(centerX, centerY) - 20;
-    const colors = ['#667eea', '#764ba2', '#f093fb', '#4fd1c5', '#48bb78', '#ed8936', '#fc5c65', '#818cf8'];
+    const colors = ['#dadadd', '#c3c4c8', '#a9aaaf', '#909196', '#77787e', '#626368', '#4e4f54', '#bfc0c4'];
 
     ctx.clearRect(0, 0, width, height);
 
@@ -865,7 +916,7 @@ function drawPieChart(canvas, data) {
     // Inner circle (donut)
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius * 0.55, 0, Math.PI * 2);
-    ctx.fillStyle = '#111127';
+    ctx.fillStyle = '#121315';
     ctx.fill();
 
     // Legend
@@ -905,7 +956,7 @@ async function drawScoreHistogram() {
         // Buckets: 0-20, 20-40, 40-60, 60-80, 80-100
         const buckets = [0, 0, 0, 0, 0];
         const bucketLabels = ['0-20', '20-40', '40-60', '60-80', '80-100'];
-        const bucketColors = ['#fc5c65', '#ed8936', '#ecc94b', '#667eea', '#48bb78'];
+        const bucketColors = ['#626368', '#77787e', '#909196', '#bfc0c4', '#dadadd'];
 
         candidates.forEach(c => {
             const s = c.overall_score || 0;
@@ -1066,10 +1117,9 @@ function hideLoading() {
 
 function showToast(message, type = 'info') {
     const container = document.getElementById('toast-container');
-    const icons = { success: '✅', error: '❌', info: 'ℹ️' };
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    toast.innerHTML = `${icons[type] || 'ℹ️'} ${escapeHtml(message)}`;
+    toast.textContent = message;
     container.appendChild(toast);
     setTimeout(() => toast.remove(), 3500);
 }

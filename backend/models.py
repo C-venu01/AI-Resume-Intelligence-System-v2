@@ -34,12 +34,13 @@ class UserInfo(BaseModel):
 class CandidateResponse(BaseModel):
     """Single candidate data returned from API."""
     id: Optional[int] = None
-    candidate_name: str = "Unknown"
+    candidate_name: str = "Name not detected"
     email: str = "Not provided"
     phone: str = "Not provided"
     linkedin: str = ""
     experience_years: int = 0
-    experience_level: str = "Fresher"
+    internship_experience_years: int = 0
+    experience_level: str = "Not specified"
     specialization: str = "Software Developer"
     technologies: List[str] = []
     certifications: List[str] = []

@@ -64,12 +64,11 @@ Default password for verification: A1zB2@c3#D4@E5% 2025-Oct
 
 3. **Render will auto-apply render.yaml settings:**
    - Env vars with `generateValue: true`
+   - A generated admin password (username: `admin`); view it in the Render service's environment settings
    - Build command: `cd backend && pip install -r requirements.txt`
    - Start command: `cd backend && python main.py`
    - Health check: `/api/health`
-   - Instances: 1
-   - Memory: 512MB
-   - Disk: 1GB
+   - Free instances use ephemeral storage: the SQLite database can be cleared when Render restarts or redeploys the service.
 
 4. **Wait for deployment** (5-10 minutes)
    - Check "Events" tab for logs

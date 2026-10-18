@@ -124,6 +124,22 @@ class TestAuthentication:
         assert verify_password(password, hashed) is True
         assert verify_password("wrongpassword", hashed) is False
 
+    def test_generated_admin_password_is_hashed_for_render(self, monkeypatch):
+        """A Render-generated password is hashed before login verification."""
+        import auth
+
+        password = "render-generated-secret"
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("JWT_SECRET_KEY", "test-jwt-secret")
+        monkeypatch.setenv("ADMIN_PASSWORD_HASH", "")
+        monkeypatch.setattr(auth, "ADMIN_PASSWORD", password)
+        monkeypatch.setattr(auth, "ADMIN_PASSWORD_HASH", "")
+
+        auth._init_admin_credentials()
+
+        assert auth.ADMIN_PASSWORD_HASH != password
+        assert verify_password(password, auth.ADMIN_PASSWORD_HASH)
+
     def test_create_and_decode_token(self):
         """JWT token creation and decoding should work."""
         payload = {"sub": "testuser", "role": "admin"}

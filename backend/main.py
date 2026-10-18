@@ -35,10 +35,11 @@ from auth import (
 from rate_limiter import rate_limit, upload_limiter, match_limiter
 from validators import pdf_validator, sanitize_filename
 from pdf_extractor import extract_text_from_pdf
-from resume_analyzer import analyze_resume
+from resume_analyzer import analyze_resume, calculate_candidate_score
 from embedding_engine import rank_candidates_for_job, is_model_ready
 from database import (
-    init_db, save_candidate, get_all_candidates, get_candidate,
+    init_db, save_candidate, update_candidate_reanalysis,
+    get_all_candidates, get_candidate,
     delete_candidate, delete_all_candidates, get_stats,
     save_job_description, get_job_descriptions,
     save_match_result, health_check as db_health_check,
@@ -249,10 +250,13 @@ async def upload_resumes(
 
             # Remove resume_text from response (privacy, size)
             analysis.pop("resume_text", None)
+            analysis.pop("name_confidence", None)
+            analysis.pop("name_evidence", None)
+            analysis.pop("experience_evidence", None)
             results.append(analysis)
 
         except Exception as e:
-            logger.error(f"Error processing {file.filename}: {type(e).__name__}")
+            logger.error(f"Error processing uploaded resume: {type(e).__name__}")
             errors.append({
                 "filename": file.filename,
                 "error": sanitize_error_message(e, include_details=settings.debug)
@@ -308,6 +312,81 @@ async def list_candidates(
         "offset": offset,
         "limit": limit,
         "candidates": candidates,
+    }
+
+
+@app.post("/api/candidates/reprocess")
+async def reprocess_candidate_records(user: dict = Depends(require_auth)):
+    """Safely refresh stored name and experience fields from saved resume text."""
+    total = count_candidates(min_score=-1)
+    updated = 0
+    missing_source = 0
+    failed = 0
+
+    for offset in range(0, total, 200):
+        candidates = get_all_candidates(
+            min_score=-1,
+            limit=200,
+            offset=offset,
+            include_resume_text=True,
+        )
+        for candidate in candidates:
+            try:
+                resume_text = candidate.get("resume_text")
+                if resume_text:
+                    analysis = analyze_resume(
+                        resume_text, candidate.get("filename", "")
+                    )
+                    update_candidate_reanalysis(candidate["id"], analysis)
+                    updated += 1
+                    continue
+
+                missing_source += 1
+                analysis = {
+                    "candidate_name": "Name not detected",
+                    "experience_years": 0,
+                    "internship_experience_years": 0,
+                    "experience_level": "Not specified",
+                    "overall_score": calculate_candidate_score(
+                        candidate.get("technologies", []),
+                        0,
+                        candidate.get("notable_achievements", []),
+                        candidate.get("projects_count", 0),
+                        candidate.get("cgpa"),
+                        candidate.get("certifications", []),
+                        candidate.get("soft_skills", []),
+                    ),
+                    "candidate_summary": (
+                        "Name and professional experience could not be verified "
+                        "because the original resume text is unavailable. "
+                        "Re-upload the resume to recover these details."
+                    ),
+                    "name_confidence": 0.0,
+                    "name_evidence": {"status": "source_unavailable"},
+                    "experience_evidence": [],
+                }
+                update_candidate_reanalysis(candidate["id"], analysis)
+                updated += 1
+            except Exception as e:
+                failed += 1
+                logger.error(
+                    f"Candidate reprocessing failed: {type(e).__name__}"
+                )
+
+    logger.info(
+        "Candidate reprocessing completed: updated=%d, missing_source=%d, failed=%d",
+        updated,
+        missing_source,
+        failed,
+    )
+    return {
+        "updated": updated,
+        "missing_source": missing_source,
+        "failed": failed,
+        "message": (
+            "Records without saved resume text are marked 'Name not detected' "
+            "with unverified experience set to zero; re-upload those resumes."
+        ),
     }
 
 

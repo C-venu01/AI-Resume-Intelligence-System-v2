@@ -18,10 +18,12 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from pdf_extractor import extract_text_from_pdf, get_pdf_page_count
 from resume_analyzer import analyze_resume
+import database
 from database import init_db, save_candidate, get_all_candidates, get_candidate, \
     delete_candidate, delete_all_candidates, save_job_description, \
     get_job_descriptions, save_match_result, get_stats
 from models import JobMatchRequest, CandidateResponse
+from rate_limiter import default_limiter, match_limiter, upload_limiter
 
 
 # =====================================================================
@@ -33,6 +35,9 @@ def _isolate_db(tmp_path, monkeypatch):
     """Use a temp database for every test so tests don't interfere."""
     db_path = str(tmp_path / "test_resume.sqlite")
     monkeypatch.setattr("database.DB_PATH", db_path)
+    default_limiter.reset()
+    match_limiter.reset()
+    upload_limiter.reset()
     init_db()
     yield db_path
 
@@ -41,7 +46,16 @@ def _isolate_db(tmp_path, monkeypatch):
 def client():
     """FastAPI TestClient (imports app fresh so DB patch is active)."""
     from main import app
-    return TestClient(app)
+    from auth import require_auth
+    app.dependency_overrides[require_auth] = lambda: {
+        "sub": "test-admin",
+        "role": "admin",
+    }
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        app.dependency_overrides.pop(require_auth, None)
 
 
 def _make_minimal_pdf(text: str = "John Doe\njohn@email.com\nPython Developer") -> bytes:
@@ -142,50 +156,70 @@ class TestResumeAnalyzer:
 
     def test_empty_text_returns_error_result(self):
         result = analyze_resume("", "empty.pdf")
-        assert result["candidate_name"] == "Unknown Candidate"
+        assert result["candidate_name"] == "Name not detected"
         assert result["overall_score"] == 0
 
     def test_whitespace_only_text(self):
         result = analyze_resume("   \n\n\t  ", "blank.pdf")
-        assert result["candidate_name"] == "Unknown Candidate"
+        assert result["candidate_name"] == "Name not detected"
 
     def test_name_extraction_from_first_line(self):
         text = "Rahul Kumar\nrahul@gmail.com\n+91-9876543210\nPython Developer with 3 years experience"
         result = analyze_resume(text, "rahul.pdf")
-        # Should extract a name, not "Unknown Candidate"
-        assert result["candidate_name"] != "Unknown Candidate"
+        assert result["candidate_name"] == "Rahul Kumar"
 
-    def test_name_not_tech_term(self):
-        """SpaCy should NOT pick 'Java' or 'Python' as a person name."""
-        text = "Java\nPython\njohn.doe@gmail.com\nSoftware Engineer\n5 years experience in backend development"
-        result = analyze_resume(text, "dev.pdf")
-        name = result["candidate_name"].lower()
-        assert name != "java"
-        assert name != "python"
+    def test_technology_terms_are_not_candidate_names(self):
+        text = (
+            "AWS\nJupyter\nPrometheus\nPandas\nDocker\nJava\n"
+            "Skills and Projects\nUsed in a data dashboard"
+        )
+        result = analyze_resume(text, "technology-terms.pdf")
+        assert result["candidate_name"] == "Name not detected"
 
     def test_name_not_location(self):
         """Location names should not be picked as person names."""
         text = "Andhra Pradesh\nHyderabad\ndev@example.com\nSoftware Developer with Python and AWS"
         result = analyze_resume(text, "loc.pdf")
-        name = result["candidate_name"].lower()
-        assert name != "andhra pradesh"
-        assert name != "hyderabad"
+        assert result["candidate_name"] == "Name not detected"
 
     def test_name_not_heading(self):
         """Resume headings should not be picked as person names."""
         text = "Resume\nObjective\nEmail: test@test.com\nPython Developer with skills in React and Node"
         result = analyze_resume(text, "heading.pdf")
-        name = result["candidate_name"].lower()
-        assert name != "resume"
-        assert name != "objective"
+        assert result["candidate_name"] == "Name not detected"
 
-    def test_name_from_email_fallback(self):
-        """When no name is found, extract from email prefix."""
+    def test_email_address_is_not_used_as_candidate_name(self):
         text = "john.doe@gmail.com\nSkills: Python, JavaScript\nExperience: 2 years at Google as Software Engineer"
         result = analyze_resume(text, "noname.pdf")
-        # Should try to extract "John Doe" from email
-        name = result["candidate_name"]
-        assert name != "Unknown Candidate" or name == "John Doe"
+        assert result["candidate_name"] == "Name not detected"
+
+    def test_contextual_header_name_wins_over_technology_entities(self):
+        text = (
+            "Ananya R. Krishnan\nananya@example.test\n+91 9876543210\n"
+            "Education\nB.Tech Computer Science 2020 - 2024\n"
+            "Skills\nAWS, Jupyter, Prometheus, Pandas, Docker, Java"
+        )
+        result = analyze_resume(text, "header-name.pdf")
+        assert result["candidate_name"] == "Ananya R. Krishnan"
+
+    def test_indian_initials_and_international_name_formats(self):
+        for name in ("R. K. Sharma", "María del Carmen O'Neill"):
+            result = analyze_resume(
+                f"{name}\ncontact@example.test\nEducation\nB.Tech 2020 - 2024",
+                "synthetic-name.pdf",
+            )
+            assert result["candidate_name"] == name
+
+    def test_projects_before_work_history_do_not_replace_name(self):
+        text = (
+            "Priya K. Nair\npriya@example.test\nProjects\n"
+            "Quick Sight dashboard using Pandas 2020 - 2024\n"
+            "Work Experience\nBackend Developer at Northwind Technologies "
+            "2021 - 2023"
+        )
+        result = analyze_resume(text, "projects-first.pdf")
+        assert result["candidate_name"] == "Priya K. Nair"
+        assert result["experience_years"] == 2
 
     def test_email_extraction(self):
         text = "Alice Bob\nalice.bob@company.co.uk\nSoftware Engineer with expertise in Python and Docker"
@@ -235,14 +269,52 @@ class TestResumeAnalyzer:
         assert result["experience_years"] >= 0
 
     def test_experience_years_date_range(self):
-        text = "Tom Brown\ntom@test.com\nSoftware Engineer at Google 2020 - 2024\nPython, React, Docker"
+        text = (
+            "Tom Brown\ntom@test.com\nProfessional Experience\n"
+            "Software Engineer at Google 2020 - 2024\nPython, React, Docker"
+        )
         result = analyze_resume(text, "dateexp.pdf")
-        assert result["experience_years"] >= 0
+        assert result["experience_years"] == 4
 
     def test_experience_years_present(self):
-        text = "Tom Brown\ntom@test.com\nSoftware Engineer at Google 2022 - present\nPython, React"
+        text = (
+            "Tom Brown\ntom@test.com\nProfessional Experience\n"
+            "Software Engineer at Google 2022 - present\nPython, React"
+        )
         result = analyze_resume(text, "present.pdf")
-        assert result["experience_years"] >= 0
+        assert result["experience_years"] >= 3
+
+    def test_education_and_project_dates_do_not_count_as_employment(self):
+        text = (
+            "Ravi Kumar\nravi@example.test\nEducation\n"
+            "B.Tech Computer Science 2019 - 2023\nProjects\n"
+            "Data Dashboard 2022 - 2024 using Pandas"
+        )
+        result = analyze_resume(text, "education-only.pdf")
+        assert result["experience_years"] == 0
+        assert result["internship_experience_years"] == 0
+        assert result["experience_level"] == "Not specified"
+
+    def test_overlapping_employment_is_not_double_counted(self):
+        text = (
+            "Maya Chen\nmaya@example.test\nEmployment History\n"
+            "Software Engineer at Acme Systems 2019 - 2022\n"
+            "Data Engineer at Northwind Technologies 2021 - 2024"
+        )
+        result = analyze_resume(text, "overlapping-work.pdf")
+        assert result["experience_years"] == 5
+        assert len(result["experience_evidence"]) == 2
+
+    def test_internship_is_reported_separately_from_employment(self):
+        text = (
+            "Dev Patel\ndev@example.test\nWork Experience\n"
+            "Software Engineer at Acme Systems 2021 - 2023\n"
+            "Internship Experience\n"
+            "Software Engineering Intern at Northwind Labs 2020 - 2021"
+        )
+        result = analyze_resume(text, "internship.pdf")
+        assert result["experience_years"] == 2
+        assert result["internship_experience_years"] == 1
 
     def test_experience_capped_at_30(self):
         text = "Veteran Dev\nvet@mail.com\n50 years of experience in software development and engineering"
@@ -254,7 +326,7 @@ class TestResumeAnalyzer:
         text = "New Grad\nnew@mail.com\n0 years experience\nSkills: Python, HTML, CSS"
         result = analyze_resume(text, "fresh.pdf")
         assert result["experience_level"] in [
-            "Fresher", "Junior", "Mid-level", "Senior", "Principal", "Lead"
+            "Not specified", "Fresher", "Junior", "Mid-level", "Senior", "Principal"
         ]
 
     def test_cgpa_extraction_out_of_ten(self):
@@ -347,6 +419,8 @@ class TestResumeAnalyzer:
         expected = [
             "candidate_name", "email", "phone", "linkedin",
             "experience_years", "experience_level", "specialization",
+            "internship_experience_years", "name_confidence", "name_evidence",
+            "experience_evidence",
             "technologies", "certifications", "soft_skills", "education",
             "cgpa", "projects_count", "notable_achievements",
             "overall_score", "candidate_summary", "filename"
@@ -407,13 +481,13 @@ class TestEmbeddingEngine:
 
     def test_empty_resume_text(self):
         from embedding_engine import compute_job_match
-        result = compute_job_match("", "Python developer needed with 5 years experience")
-        assert isinstance(result["match_score"], (int, float))
+        with pytest.raises(ValueError, match="Resume text is empty"):
+            compute_job_match("", "Python developer needed with 5 years experience")
 
     def test_empty_job_description(self):
         from embedding_engine import compute_job_match
-        result = compute_job_match("Python developer with Docker and AWS experience", "")
-        assert isinstance(result["match_score"], (int, float))
+        with pytest.raises(ValueError, match="Job description is empty"):
+            compute_job_match("Python developer with Docker and AWS experience", "")
 
     def test_rank_candidates(self):
         from embedding_engine import rank_candidates_for_job
@@ -663,6 +737,91 @@ class TestAPI:
     def test_get_candidate_not_found(self, client):
         r = client.get("/api/candidates/99999")
         assert r.status_code == 404
+
+    def test_reprocess_updates_legacy_records_in_place(self, client):
+        resumes = [
+            (
+                "legacy-no-name.pdf",
+                "Prometheus\nJupyter\nPandas\nDocker\nJava\nSkills\n"
+                "Projects\nQuick Sight dashboard 2020 - 2024",
+            ),
+            (
+                "legacy-work.pdf",
+                "Maya Chen\nmaya@example.test\nEducation\nB.Tech 2016 - 2020\n"
+                "Professional Experience\n"
+                "Software Engineer at Acme Systems Jan 2020 - Dec 2024",
+            ),
+        ]
+        uploaded = client.post(
+            "/api/upload",
+            files=[
+                ("files", (filename, _make_minimal_pdf(text), "application/pdf"))
+                for filename, text in resumes
+            ],
+        )
+        assert uploaded.status_code == 200
+        candidates = uploaded.json()["candidates"]
+        assert len(candidates) == 2
+        ids = {candidate["id"] for candidate in candidates}
+        assert all(
+            key not in candidates[0]
+            for key in ("resume_text", "name_evidence", "name_confidence", "experience_evidence")
+        )
+
+        with database.db_connection() as conn:
+            for candidate_id in ids:
+                conn.execute(
+                    "UPDATE candidates SET candidate_name = ?, experience_years = 7, "
+                    "experience_level = 'Senior' WHERE id = ?",
+                    ("Pandas", candidate_id),
+                )
+
+        reprocessed = client.post("/api/candidates/reprocess")
+        assert reprocessed.status_code == 200
+        assert reprocessed.json()["updated"] == 2
+        assert reprocessed.json()["missing_source"] == 0
+        assert reprocessed.json()["failed"] == 0
+
+        listed = client.get("/api/candidates").json()["candidates"]
+        assert {candidate["id"] for candidate in listed} == ids
+        by_id = {candidate["id"]: candidate for candidate in listed}
+        detail_by_id = {
+            candidate_id: client.get(f"/api/candidates/{candidate_id}").json()
+            for candidate_id in ids
+        }
+        no_name_id = next(
+            candidate_id
+            for candidate_id, candidate in by_id.items()
+            if candidate["filename"] == "legacy-no-name.pdf"
+        )
+        work_id = next(candidate_id for candidate_id in ids if candidate_id != no_name_id)
+
+        assert by_id[no_name_id]["candidate_name"] == "Name not detected"
+        assert by_id[no_name_id]["experience_years"] == 0
+        assert by_id[work_id]["candidate_name"] == "Maya Chen"
+        assert by_id[work_id]["experience_years"] == 5
+        for candidate_id in ids:
+            assert detail_by_id[candidate_id]["candidate_name"] == by_id[candidate_id]["candidate_name"]
+            assert detail_by_id[candidate_id]["experience_years"] == by_id[candidate_id]["experience_years"]
+            assert "resume_text" not in detail_by_id[candidate_id]
+            assert "name_evidence" not in detail_by_id[candidate_id]
+
+    def test_reprocess_marks_missing_source_without_inventing_name(self, client):
+        candidate_id = save_candidate(_sample_candidate({
+            "candidate_name": "Jupyter",
+            "experience_years": 7,
+            "experience_level": "Senior",
+            "resume_text": "",
+        }))
+
+        response = client.post("/api/candidates/reprocess")
+        assert response.status_code == 200
+        assert response.json()["missing_source"] == 1
+        candidate = client.get(f"/api/candidates/{candidate_id}").json()
+        assert candidate["id"] == candidate_id
+        assert candidate["candidate_name"] == "Name not detected"
+        assert candidate["experience_years"] == 0
+        assert "re-upload" in candidate["candidate_summary"].lower()
 
     def test_delete_candidate_not_found(self, client):
         r = client.delete("/api/candidates/99999")

@@ -7,7 +7,7 @@
     <meta name="robots" content="noindex, nofollow">
     <title>AI Resume Intelligence System 2.0 — Hiring Copilot</title>
     <link rel="stylesheet" href="/static/index.css">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%231b1c1f'/%3E%3Ctext x='50' y='68' text-anchor='middle' font-size='56' font-family='Arial' fill='%23e7e7e9'%3ER%3C/text%3E%3C/svg%3E">
 </head>
 <body>
     <div class="app-container">
@@ -15,7 +15,7 @@
         <!-- ==================== HEADER ==================== -->
         <header class="header">
             <div class="header-brand">
-                <div class="header-logo">🤖</div>
+                <div class="header-logo" aria-hidden="true">R</div>
                 <div>
                     <h1 class="header-title">AI Resume Intelligence</h1>
                     <p class="header-subtitle">Cloud-Based Hiring Copilot v2.0</p>
@@ -24,26 +24,26 @@
             <div class="header-actions">
                 <!-- Login Section (shown when not authenticated) -->
                 <div id="login-section" style="display: none;">
-                    <button class="btn btn-primary btn-sm" onclick="showLoginModal()" id="login-btn">
-                        🔐 Login
+                    <button class="btn btn-signin btn-signin-small" onclick="showLoginModal()" id="login-btn">
+                        Sign in
                     </button>
                 </div>
                 <!-- User Section (shown when authenticated) -->
                 <div id="user-section" style="display: none; align-items: center; gap: 12px;">
                     <span style="font-size: 13px; color: var(--text-secondary);">
-                        👤 <span id="current-username">Admin</span>
+                        <span id="current-username">Admin</span>
                     </span>
                     <button class="btn btn-secondary btn-sm" onclick="exportData('json')" id="export-json-btn">
-                        📥 Export JSON
+                        Export JSON
                     </button>
                     <button class="btn btn-secondary btn-sm" onclick="exportData('csv')" id="export-csv-btn">
-                        📊 Export CSV
+                        Export CSV
                     </button>
                     <button class="btn btn-danger btn-sm" onclick="clearAll()" id="clear-all-btn">
-                        🗑️ Clear All
+                        Clear all
                     </button>
                     <button class="btn btn-secondary btn-sm" onclick="handleLogout()" id="logout-btn">
-                        🚪 Logout
+                        Sign out
                     </button>
                 </div>
             </div>
@@ -51,14 +51,17 @@
 
         <!-- ==================== LOGIN PROMPT (shown when not authenticated) ==================== -->
         <div id="login-prompt" class="tab-content active" style="display: none;">
-            <div class="empty-state" style="padding: 80px 20px;">
-                <div class="empty-state-icon">🔐</div>
-                <div class="empty-state-title">Authentication Required</div>
-                <div class="empty-state-text">Please login to access the AI Resume Intelligence System</div>
-                <button class="btn btn-primary" style="margin-top:20px" onclick="showLoginModal()" id="login-prompt-btn">
-                    🔐 Login
+            <section class="login-gate" aria-labelledby="login-heading">
+                <div class="login-gate-mark" aria-hidden="true">✳</div>
+                <p class="login-eyebrow">AI RESUME INTELLIGENCE</p>
+                <h2 class="login-heading" id="login-heading">A clearer view of every candidate.</h2>
+                <p class="login-copy">Sign in to review resumes, compare skills, and make your next great hire.</p>
+                <button class="btn btn-signin" onclick="showLoginModal()" id="login-prompt-btn">
+                    <span>Sign in</span>
+                    <span class="signin-arrow" aria-hidden="true">↗</span>
                 </button>
-            </div>
+                <p class="login-footnote">Private workspace · Secure access</p>
+            </section>
         </div>
 
         <!-- ==================== NAVIGATION ==================== -->
@@ -110,11 +113,10 @@
 
                 <!-- Recent candidates preview -->
                 <div class="section-header">
-                    <h2 class="section-title">🏆 Top Candidates</h2>
+                    <h2 class="section-title">Top candidates</h2>
                 </div>
                 <div class="candidates-grid" id="dashboard-top-candidates"></div>
                 <div class="empty-state" id="dashboard-empty">
-                    <div class="empty-state-icon">📋</div>
                     <div class="empty-state-title">No candidates yet</div>
                     <div class="empty-state-text">Upload resumes to start analyzing candidates</div>
                     <button class="btn btn-primary" style="margin-top:20px" onclick="switchTab('upload')" id="goto-upload-btn">
@@ -126,11 +128,11 @@
             <!-- ==================== UPLOAD TAB ==================== -->
             <div class="tab-content" id="tab-upload">
                 <div class="section-header">
-                    <h2 class="section-title">📤 Upload Resumes</h2>
+                    <h2 class="section-title">Upload resumes</h2>
                 </div>
 
                 <div class="upload-zone" id="upload-zone">
-                    <div class="upload-icon">📄</div>
+                    <div class="upload-icon" aria-hidden="true">PDF</div>
                     <div class="upload-title">Drag & Drop Resume PDFs Here</div>
                     <div class="upload-subtitle">or click to browse files • PDF format only • Max 10MB per file • Max 20 files</div>
                     <div class="upload-btn-wrapper">
@@ -159,7 +161,7 @@
             <div class="tab-content" id="tab-candidates">
                 <div class="section-header">
                     <h2 class="section-title">
-                        👥 All Candidates
+                        All candidates
                         <span class="section-badge" id="candidates-count">0</span>
                     </h2>
                 </div>
@@ -172,12 +174,16 @@
                     </div>
                     <select class="filter-select" id="filter-level">
                         <option value="">All Levels</option>
+                        <option value="Not specified">Not specified</option>
                         <option value="Fresher">Fresher</option>
                         <option value="Junior">Junior</option>
                         <option value="Mid-level">Mid-level</option>
                         <option value="Senior">Senior</option>
                         <option value="Principal">Principal</option>
                     </select>
+                    <button class="btn btn-secondary btn-sm" onclick="reprocessCandidates()" id="reprocess-candidates-btn">
+                        Recheck stored resumes
+                    </button>
                     <select class="filter-select" id="sort-by">
                         <option value="overall_score">Sort by Score</option>
                         <option value="experience_years">Sort by Experience</option>
@@ -197,7 +203,7 @@
             <!-- ==================== JOB MATCH TAB ==================== -->
             <div class="tab-content" id="tab-job-match">
                 <div class="section-header">
-                    <h2 class="section-title">🎯 AI Job Matching</h2>
+                    <h2 class="section-title">Job matching</h2>
                 </div>
 
                 <div class="job-match-container">
@@ -238,24 +244,24 @@
             <!-- ==================== ANALYTICS TAB ==================== -->
             <div class="tab-content" id="tab-analytics">
                 <div class="section-header">
-                    <h2 class="section-title">📈 Analytics</h2>
+                    <h2 class="section-title">Analytics</h2>
                 </div>
 
                 <div class="charts-grid">
                     <div class="chart-card">
-                        <h3 class="chart-title">🛠️ Top Technologies</h3>
+                        <h3 class="chart-title">Top technologies</h3>
                         <canvas class="chart-canvas" id="chart-technologies"></canvas>
                     </div>
                     <div class="chart-card">
-                        <h3 class="chart-title">📊 Score Distribution</h3>
+                        <h3 class="chart-title">Score distribution</h3>
                         <canvas class="chart-canvas" id="chart-scores"></canvas>
                     </div>
                     <div class="chart-card">
-                        <h3 class="chart-title">💼 Experience Levels</h3>
+                        <h3 class="chart-title">Experience levels</h3>
                         <canvas class="chart-canvas" id="chart-experience"></canvas>
                     </div>
                     <div class="chart-card">
-                        <h3 class="chart-title">🎯 Specializations</h3>
+                        <h3 class="chart-title">Specializations</h3>
                         <canvas class="chart-canvas" id="chart-specializations"></canvas>
                     </div>
                 </div>
@@ -266,31 +272,30 @@
     </div>
 
     <!-- ==================== LOGIN MODAL ==================== -->
-    <div class="loading-overlay" id="login-modal" style="display: none;">
-        <div class="glass-card" style="max-width: 400px; width: 90%; padding: 32px;" onclick="event.stopPropagation()">
-            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 8px; text-align: center;">🔐 Login</h2>
-            <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 24px; text-align: center;">
-                Enter your credentials to access the system
+    <div class="loading-overlay login-overlay" id="login-modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="signin-title">
+        <div class="login-dialog" onclick="event.stopPropagation()">
+            <p class="login-eyebrow">WELCOME BACK</p>
+            <h2 class="login-dialog-title" id="signin-title">Sign in to continue</h2>
+            <p class="login-dialog-copy">
+                Use your workspace credentials to securely access your hiring dashboard.
             </p>
             <form id="login-form" onsubmit="return false;">
-                <div style="margin-bottom: 16px;">
-                    <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;">Username</label>
-                    <input type="text" id="login-username" class="text-input" placeholder="Enter username" required autocomplete="username">
+                <div class="signin-field">
+                    <label for="login-username">Username</label>
+                    <input type="text" id="login-username" class="text-input" placeholder="Your username" required autocomplete="username">
                 </div>
-                <div style="margin-bottom: 24px;">
-                    <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;">Password</label>
-                    <input type="password" id="login-password" class="text-input" placeholder="Enter password" required autocomplete="current-password">
+                <div class="signin-field">
+                    <label for="login-password">Password</label>
+                    <input type="password" id="login-password" class="text-input" placeholder="Your password" required autocomplete="current-password">
                 </div>
-                <button type="submit" class="btn btn-primary" style="width: 100%;" onclick="handleLoginClick()">
-                    🔐 Login
+                <button type="submit" class="btn btn-signin btn-signin-submit" onclick="handleLoginClick()">
+                    <span>Sign in</span>
+                    <span class="signin-arrow" aria-hidden="true">↗</span>
                 </button>
             </form>
-            <button class="btn btn-secondary" style="width: 100%; margin-top: 12px;" onclick="hideLoginModal()">
-                Cancel
+            <button class="signin-cancel" onclick="hideLoginModal()">
+                Back to home
             </button>
-            <p style="color: var(--text-muted); font-size: 12px; margin-top: 16px; text-align: center;">
-                Default: admin / admin123 (change in production)
-            </p>
         </div>
     </div>
 
