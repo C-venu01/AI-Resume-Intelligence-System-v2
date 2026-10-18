@@ -4,6 +4,7 @@ JWT-based authentication with secure password hashing.
 Protects sensitive candidate data and destructive operations.
 """
 
+import hashlib
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -33,12 +34,30 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+BCRYPT_SHA256_PREFIX = "$bcrypt-sha256$"
 
 # HTTP Bearer scheme for token extraction
 security = HTTPBearer(auto_error=False)
 
 
 # ==================== INITIALIZATION ====================
+
+def hash_password(password: str) -> str:
+    """Hash a password using bcrypt, pre-hashing values longer than bcrypt's limit."""
+    password_bytes = password.encode("utf-8")
+    if len(password_bytes) > 72:
+        digest = hashlib.sha256(password_bytes).hexdigest()
+        return BCRYPT_SHA256_PREFIX + pwd_context.hash(digest)
+    return pwd_context.hash(password)
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a password, including hashes created from long passwords."""
+    if hashed_password.startswith(BCRYPT_SHA256_PREFIX):
+        digest = hashlib.sha256(plain_password.encode("utf-8")).hexdigest()
+        return pwd_context.verify(digest, hashed_password[len(BCRYPT_SHA256_PREFIX):])
+    return pwd_context.verify(plain_password, hashed_password)
+
 
 def _init_admin_credentials():
     """
@@ -50,11 +69,11 @@ def _init_admin_credentials():
 
     if not ADMIN_PASSWORD_HASH:
         if ADMIN_PASSWORD:
-            ADMIN_PASSWORD_HASH = pwd_context.hash(ADMIN_PASSWORD)
+            ADMIN_PASSWORD_HASH = hash_password(ADMIN_PASSWORD)
         else:
             # Development fallback: hash a default password
             default_password = "admin123"
-            ADMIN_PASSWORD_HASH = pwd_context.hash(default_password)
+            ADMIN_PASSWORD_HASH = hash_password(default_password)
             print(f"[Auth] WARNING: Using default admin password '{default_password}'. Set ADMIN_PASSWORD_HASH for production!")
 
     # Validate that we have required config
@@ -69,18 +88,6 @@ def _init_admin_credentials():
 
 # Initialize on module import
 _init_admin_credentials()
-
-
-# ==================== PASSWORD UTILITIES ====================
-
-def hash_password(password: str) -> str:
-    """Hash a password using bcrypt."""
-    return pwd_context.hash(password)
-
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash."""
-    return pwd_context.verify(plain_password, hashed_password)
 
 
 # ==================== JWT UTILITIES ====================

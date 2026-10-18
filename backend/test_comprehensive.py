@@ -124,6 +124,17 @@ class TestAuthentication:
         assert verify_password(password, hashed) is True
         assert verify_password("wrongpassword", hashed) is False
 
+    def test_long_password_hash_and_verify(self):
+        """Passwords exceeding bcrypt's byte limit remain verifiable without truncation."""
+        import auth
+
+        password = "render-generated-secret-" * 8
+        hashed = hash_password(password)
+
+        assert hashed.startswith(auth.BCRYPT_SHA256_PREFIX)
+        assert verify_password(password, hashed) is True
+        assert verify_password(password[:-1], hashed) is False
+
     def test_generated_admin_password_is_hashed_for_render(self, monkeypatch):
         """A Render-generated password is hashed before login verification."""
         import auth
