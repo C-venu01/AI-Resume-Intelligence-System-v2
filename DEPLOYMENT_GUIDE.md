@@ -65,9 +65,10 @@ Default password for verification: A1zB2@c3#D4@E5% 2025-Oct
 3. **Render will auto-apply render.yaml settings:**
    - Env vars with `generateValue: true`
    - A generated admin password (username: `admin`); view it in the Render service's environment settings
-   - Build command: `cd backend && pip install -r requirements.txt`
+   - Build command: `cd backend && pip install -r requirements.txt && python -m spacy download en_core_web_sm`
    - Start command: `cd backend && python main.py`
    - Health check: `/api/health`
+   - The spaCy model is installed during the build so application startup does not need to download it.
    - Free instances use ephemeral storage: the SQLite database can be cleared when Render restarts or redeploys the service.
 
 4. **Wait for deployment** (5-10 minutes)
@@ -91,7 +92,7 @@ https://ai-resume-backend.onrender.com
    Runtime: Python 3.11+
 
    # Build Command
-   cd backend && pip install -r requirements.txt
+   cd backend && pip install -r requirements.txt && python -m spacy download en_core_web_sm
 
    # Start Command
    cd backend && python main.py
