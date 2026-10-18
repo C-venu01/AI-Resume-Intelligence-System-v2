@@ -24,6 +24,9 @@
             <div class="header-actions">
                 <!-- Login Section (shown when not authenticated) -->
                 <div id="login-section" style="display: none;">
+                    <button class="btn btn-secondary btn-sm" onclick="showRegisterModal()" id="register-btn">
+                        Create account
+                    </button>
                     <button class="btn btn-signin btn-signin-small" onclick="showLoginModal()" id="login-btn">
                         Sign in
                     </button>
@@ -56,10 +59,15 @@
                 <p class="login-eyebrow">AI RESUME INTELLIGENCE</p>
                 <h2 class="login-heading" id="login-heading">A clearer view of every candidate.</h2>
                 <p class="login-copy">Sign in to review resumes, compare skills, and make your next great hire.</p>
-                <button class="btn btn-signin" onclick="showLoginModal()" id="login-prompt-btn">
-                    <span>Sign in</span>
-                    <span class="signin-arrow" aria-hidden="true">↗</span>
-                </button>
+                <div class="login-gate-actions">
+                    <button class="btn btn-signin" onclick="showLoginModal()" id="login-prompt-btn">
+                        <span>Sign in</span>
+                        <span class="signin-arrow" aria-hidden="true">↗</span>
+                    </button>
+                    <button class="btn btn-secondary login-create-account" onclick="showRegisterModal()">
+                        Create account
+                    </button>
+                </div>
                 <p class="login-footnote">Private workspace · Secure access</p>
             </section>
         </div>
@@ -271,14 +279,18 @@
 
     </div>
 
-    <!-- ==================== LOGIN MODAL ==================== -->
+    <!-- ==================== AUTH MODAL ==================== -->
     <div class="loading-overlay login-overlay" id="login-modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="signin-title">
         <div class="login-dialog" onclick="event.stopPropagation()">
-            <p class="login-eyebrow">WELCOME BACK</p>
+            <p class="login-eyebrow" id="auth-eyebrow">WELCOME BACK</p>
             <h2 class="login-dialog-title" id="signin-title">Sign in to continue</h2>
-            <p class="login-dialog-copy">
+            <p class="login-dialog-copy" id="auth-dialog-copy">
                 Use your workspace credentials to securely access your hiring dashboard.
             </p>
+            <div class="auth-mode-tabs" role="tablist" aria-label="Account access">
+                <button class="auth-mode-tab active" id="auth-login-tab" type="button" role="tab" aria-selected="true" onclick="setAuthMode('login')">Sign in</button>
+                <button class="auth-mode-tab" id="auth-register-tab" type="button" role="tab" aria-selected="false" onclick="setAuthMode('register')">Create account</button>
+            </div>
             <form id="login-form" onsubmit="return false;">
                 <div class="signin-field">
                     <label for="login-username">Username</label>
@@ -288,10 +300,30 @@
                     <label for="login-password">Password</label>
                     <input type="password" id="login-password" class="text-input" placeholder="Your password" required autocomplete="current-password">
                 </div>
-                <button type="submit" class="btn btn-signin btn-signin-submit" onclick="handleLoginClick()">
+                <button type="submit" class="btn btn-signin btn-signin-submit">
                     <span>Sign in</span>
                     <span class="signin-arrow" aria-hidden="true">↗</span>
                 </button>
+            </form>
+            <form id="register-form" onsubmit="return false;" hidden>
+                <div class="signin-field">
+                    <label for="register-username">Username</label>
+                    <input type="text" id="register-username" class="text-input" placeholder="Choose a username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]*" autocomplete="username">
+                    <small class="signin-hint">3–32 characters: letters, numbers, dots, hyphens, or underscores.</small>
+                </div>
+                <div class="signin-field">
+                    <label for="register-password">Password</label>
+                    <input type="password" id="register-password" class="text-input" placeholder="At least 12 characters" required minlength="12" maxlength="200" autocomplete="new-password">
+                </div>
+                <div class="signin-field">
+                    <label for="register-confirm-password">Confirm password</label>
+                    <input type="password" id="register-confirm-password" class="text-input" placeholder="Enter your password again" required minlength="12" maxlength="200" autocomplete="new-password">
+                </div>
+                <button type="submit" class="btn btn-signin btn-signin-submit">
+                    <span>Create account</span>
+                    <span class="signin-arrow" aria-hidden="true">↗</span>
+                </button>
+                <p class="login-footnote auth-privacy-note">Your workspace is private to your account.</p>
             </form>
             <button class="signin-cancel" onclick="hideLoginModal()">
                 Back to home
@@ -310,29 +342,36 @@
 
     <script src="/static/app.js"></script>
     <script>
-        // Login modal helpers
+        // Authentication modal helpers
         function showLoginModal() {
+            setAuthMode('login');
             document.getElementById('login-modal').style.display = 'flex';
             document.getElementById('login-username').focus();
         }
 
-        function hideLoginModal() {
-            document.getElementById('login-modal').style.display = 'none';
+        function showRegisterModal() {
+            setAuthMode('register');
+            document.getElementById('login-modal').style.display = 'flex';
+            document.getElementById('register-username').focus();
         }
 
-        async function handleLoginClick() {
-            const username = document.getElementById('login-username').value;
-            const password = document.getElementById('login-password').value;
+        function setAuthMode(mode) {
+            const isLogin = mode === 'login';
+            document.getElementById('login-form').hidden = !isLogin;
+            document.getElementById('register-form').hidden = isLogin;
+            document.getElementById('auth-login-tab').classList.toggle('active', isLogin);
+            document.getElementById('auth-login-tab').setAttribute('aria-selected', String(isLogin));
+            document.getElementById('auth-register-tab').classList.toggle('active', !isLogin);
+            document.getElementById('auth-register-tab').setAttribute('aria-selected', String(!isLogin));
+            document.getElementById('signin-title').textContent = isLogin ? 'Sign in to continue' : 'Create your workspace';
+            document.getElementById('auth-dialog-copy').textContent = isLogin
+                ? 'Use your workspace credentials to securely access your hiring dashboard.'
+                : 'Create a private workspace to upload and review your own candidates.';
+            document.getElementById('auth-eyebrow').textContent = isLogin ? 'WELCOME BACK' : 'GET STARTED';
+        }
 
-            if (!username || !password) {
-                showToast('Please enter username and password', 'error');
-                return;
-            }
-
-            const success = await handleLogin(username, password);
-            if (success) {
-                hideLoginModal();
-            }
+        function hideLoginModal() {
+            document.getElementById('login-modal').style.display = 'none';
         }
 
         // Close modal on background click
@@ -342,12 +381,6 @@
             }
         });
 
-        // Handle Enter key in login form
-        document.getElementById('login-password').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                handleLoginClick();
-            }
-        });
     </script>
 </body>
 </html>

@@ -812,7 +812,7 @@ class TestAPI:
             "experience_years": 7,
             "experience_level": "Senior",
             "resume_text": "",
-        }))
+        }), owner_username="test-admin")
 
         response = client.post("/api/candidates/reprocess")
         assert response.status_code == 200

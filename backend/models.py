@@ -13,6 +13,22 @@ class LoginRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=100, description="Username")
     password: str = Field(..., min_length=1, max_length=200, description="Password")
 
+class RegistrationRequest(BaseModel):
+    """Request body for creating an isolated workspace account."""
+    username: str = Field(
+        ...,
+        min_length=3,
+        max_length=32,
+        pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$",
+        description="3-32 character username",
+    )
+    password: str = Field(..., min_length=12, max_length=200, description="Password")
+
+    @field_validator("username", mode="before")
+    @classmethod
+    def normalize_username(cls, value: str) -> str:
+        return value.strip().lower() if isinstance(value, str) else value
+
 
 class TokenResponse(BaseModel):
     """Token response after successful login."""

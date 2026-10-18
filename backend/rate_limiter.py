@@ -126,6 +126,8 @@ class InMemoryRateLimiter:
 default_limiter = InMemoryRateLimiter(requests_per_minute=settings.rate_limit_requests)
 upload_limiter = InMemoryRateLimiter(requests_per_minute=settings.rate_limit_upload_requests)
 match_limiter = InMemoryRateLimiter(requests_per_minute=settings.rate_limit_match_requests)
+login_limiter = InMemoryRateLimiter(requests_per_minute=10)
+registration_limiter = InMemoryRateLimiter(requests_per_minute=8)
 
 
 def rate_limit(limiter: InMemoryRateLimiter = None):

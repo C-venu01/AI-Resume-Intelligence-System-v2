@@ -90,14 +90,10 @@ async function handleLogin(username, password) {
             body: JSON.stringify({ username, password }),
         });
 
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            throw new Error(error.detail || 'Login failed');
-        }
-
-        const data = await response.json();
+        const data = await readApiJson(response, 'Login failed');
         saveAuthToStorage(data.access_token, data.user);
         updateAuthUI();
+        if (typeof hideLoginModal === 'function') hideLoginModal();
         showToast('Login successful!', 'success');
         loadDashboard();
         return true;
@@ -116,6 +112,7 @@ async function handleLogout() {
 
 function initAuthForms() {
     const loginForm = document.getElementById('login-form');
+    const registerForm = document.getElementById('register-form');
     const logoutBtn = document.getElementById('logout-btn');
 
     if (loginForm) {
@@ -124,6 +121,32 @@ function initAuthForms() {
             const username = document.getElementById('login-username').value;
             const password = document.getElementById('login-password').value;
             await handleLogin(username, password);
+        });
+    }
+
+    if (registerForm) {
+        registerForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const username = document.getElementById('register-username').value.trim();
+            const password = document.getElementById('register-password').value;
+            const confirmation = document.getElementById('register-confirm-password').value;
+
+            if (password !== confirmation) {
+                showToast('Passwords do not match', 'error');
+                document.getElementById('register-confirm-password').focus();
+                return;
+            }
+
+            try {
+                const data = await apiPost('/auth/register', { username, password });
+                saveAuthToStorage(data.access_token, data.user);
+                updateAuthUI();
+                if (typeof hideLoginModal === 'function') hideLoginModal();
+                showToast('Workspace created successfully', 'success');
+                loadDashboard();
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
         });
     }
 
@@ -390,11 +413,7 @@ async function analyzeFiles() {
         progressBar.style.width = '70%';
         progressText.textContent = 'Analyzing with AI...';
 
-        const result = await response.json();
-
-        if (!response.ok) {
-            throw new Error(result.detail || 'Upload failed');
-        }
+        const result = await readApiJson(response, 'Upload failed');
 
         progressBar.style.width = '100%';
         progressText.textContent = `Done: ${result.success} analyzed, ${result.failed} failed`;
@@ -1059,11 +1078,7 @@ async function apiGet(path) {
         handleLogout();
         throw new Error('Session expired. Please login again.');
     }
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `API Error: ${res.status}`);
-    }
-    return res.json();
+    return readApiJson(res, `API Error: ${res.status}`);
 }
 
 async function apiPost(path, body) {
@@ -1079,11 +1094,7 @@ async function apiPost(path, body) {
         handleLogout();
         throw new Error('Session expired. Please login again.');
     }
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `API Error: ${res.status}`);
-    }
-    return res.json();
+    return readApiJson(res, `API Error: ${res.status}`);
 }
 
 async function apiDelete(path) {
@@ -1095,11 +1106,30 @@ async function apiDelete(path) {
         handleLogout();
         throw new Error('Session expired. Please login again.');
     }
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `API Error: ${res.status}`);
+    return readApiJson(res, `API Error: ${res.status}`);
+}
+
+async function readApiJson(response, fallbackMessage) {
+    const responseText = await response.text();
+    let result;
+
+    try {
+        result = responseText ? JSON.parse(responseText) : {};
+    } catch {
+        const isHtml = /text\/html/i.test(response.headers.get('content-type') || '')
+            || /^\s*(<!doctype html|<html\b)/i.test(responseText);
+        if (isHtml || [502, 503, 504].includes(response.status)) {
+            throw new Error(
+                'The server is temporarily unavailable. Wait a moment, then retry the upload.'
+            );
+        }
+        throw new Error(`The server returned an unexpected response (HTTP ${response.status}).`);
     }
-    return res.json();
+
+    if (!response.ok) {
+        throw new Error(result.detail || fallbackMessage);
+    }
+    return result;
 }
 
 // ==================== UI HELPERS ====================

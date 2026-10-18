@@ -226,17 +226,25 @@ def authenticate_user(username: str, password: str) -> Optional[Dict]:
     Returns:
         User info dict if authenticated, None otherwise
     """
-    # For this application, we only have an admin user
-    if username != ADMIN_USERNAME:
-        return None
+    normalized_username = username.strip()
+    if normalized_username.casefold() == ADMIN_USERNAME.casefold():
+        if not verify_password(password, ADMIN_PASSWORD_HASH):
+            return None
+        return {
+            "sub": ADMIN_USERNAME,
+            "role": "admin",
+            "name": "Administrator",
+        }
 
-    if not verify_password(password, ADMIN_PASSWORD_HASH):
+    from database import get_user_by_username
+
+    user = get_user_by_username(normalized_username)
+    if not user or not verify_password(password, user["password_hash"]):
         return None
 
     return {
-        "sub": username,
-        "role": "admin",
-        "name": "Administrator",
+        "sub": user["username"],
+        "role": "user",
     }
 
 

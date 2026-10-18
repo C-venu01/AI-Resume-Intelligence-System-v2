@@ -98,6 +98,7 @@ def init_db():
         cursor.executescript("""
             CREATE TABLE IF NOT EXISTS candidates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_username TEXT NOT NULL DEFAULT 'admin',
                 candidate_name TEXT NOT NULL,
                 email TEXT,
                 phone TEXT,
@@ -126,8 +127,16 @@ def init_db():
 
             CREATE TABLE IF NOT EXISTS job_descriptions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_username TEXT NOT NULL DEFAULT 'admin',
                 title TEXT NOT NULL,
                 description TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                password_hash TEXT NOT NULL,
                 created_at TEXT DEFAULT (datetime('now'))
             );
 
@@ -160,6 +169,27 @@ def init_db():
         existing_columns = {
             row["name"] for row in cursor.execute("PRAGMA table_info(candidates)")
         }
+        if "owner_username" not in existing_columns:
+            cursor.execute(
+                "ALTER TABLE candidates ADD COLUMN owner_username TEXT NOT NULL DEFAULT 'admin'"
+            )
+            cursor.execute(
+                "UPDATE candidates SET owner_username = ?",
+                (settings.admin_username,),
+            )
+
+        existing_job_columns = {
+            row["name"] for row in cursor.execute("PRAGMA table_info(job_descriptions)")
+        }
+        if "owner_username" not in existing_job_columns:
+            cursor.execute(
+                "ALTER TABLE job_descriptions ADD COLUMN owner_username TEXT NOT NULL DEFAULT 'admin'"
+            )
+            cursor.execute(
+                "UPDATE job_descriptions SET owner_username = ?",
+                (settings.admin_username,),
+            )
+
         migrations = {
             "internship_experience_years": "INTEGER DEFAULT 0",
             "name_confidence": "REAL DEFAULT 0",
@@ -171,6 +201,14 @@ def init_db():
                 cursor.execute(
                     f"ALTER TABLE candidates ADD COLUMN {column} {definition}"
                 )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_candidates_owner "
+            "ON candidates(owner_username, overall_score DESC)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_job_descriptions_owner "
+            "ON job_descriptions(owner_username, created_at DESC)"
+        )
 
     logger.info(f"Database initialized at {DB_PATH}")
 
@@ -181,13 +219,8 @@ def health_check() -> Dict:
     Used by the /api/health endpoint.
     """
     try:
-        with db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM candidates")
-            count = cursor.fetchone()[0]
         return {
             "status": "healthy",
-            "candidate_count": count,
         }
     except Exception as e:
         logger.error(f"Database health check failed: {type(e).__name__}")
@@ -199,7 +232,7 @@ def health_check() -> Dict:
 
 # ==================== CANDIDATE CRUD ====================
 
-def save_candidate(data: Dict) -> int:
+def save_candidate(data: Dict, owner_username: Optional[str] = None) -> int:
     """
     Save a candidate analysis result to the database.
     Returns the new candidate ID.
@@ -208,7 +241,7 @@ def save_candidate(data: Dict) -> int:
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO candidates (
-                candidate_name, email, phone, linkedin,
+                owner_username, candidate_name, email, phone, linkedin,
                 experience_years, internship_experience_years,
                 experience_level, specialization,
                 technologies, certifications, soft_skills,
@@ -216,8 +249,9 @@ def save_candidate(data: Dict) -> int:
                 notable_achievements, overall_score,
                 candidate_summary, filename, resume_text,
                 name_confidence, name_evidence, experience_evidence
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
+            owner_username or settings.admin_username,
             data.get("candidate_name", "Name not detected"),
             data.get("email", ""),
             data.get("phone", ""),
@@ -244,7 +278,9 @@ def save_candidate(data: Dict) -> int:
         return cursor.lastrowid
 
 
-def update_candidate_reanalysis(candidate_id: int, data: Dict) -> bool:
+def update_candidate_reanalysis(
+    candidate_id: int, data: Dict, owner_username: Optional[str] = None
+) -> bool:
     """Update corrected parser results without changing the candidate ID."""
     with db_connection() as conn:
         cursor = conn.cursor()
@@ -260,7 +296,7 @@ def update_candidate_reanalysis(candidate_id: int, data: Dict) -> bool:
                 name_evidence = ?,
                 experience_evidence = ?,
                 updated_at = datetime('now')
-            WHERE id = ?
+            WHERE id = ? AND owner_username = ?
         """, (
             data.get("candidate_name", "Name not detected"),
             data.get("experience_years", 0),
@@ -272,6 +308,7 @@ def update_candidate_reanalysis(candidate_id: int, data: Dict) -> bool:
             json.dumps(data.get("name_evidence", {})),
             json.dumps(data.get("experience_evidence", [])),
             candidate_id,
+            owner_username or settings.admin_username,
         ))
         return cursor.rowcount > 0
 
@@ -285,6 +322,7 @@ def get_all_candidates(
     limit: Optional[int] = None,
     offset: int = 0,
     include_resume_text: bool = False,
+    owner_username: Optional[str] = None,
 ) -> List[Dict]:
     """
     Get candidates with optional filtering, sorting, and pagination.
@@ -305,8 +343,8 @@ def get_all_candidates(
     with db_connection() as conn:
         cursor = conn.cursor()
 
-        query = "SELECT * FROM candidates WHERE overall_score >= ?"
-        params: list = [min_score]
+        query = "SELECT * FROM candidates WHERE owner_username = ? AND overall_score >= ?"
+        params: list = [owner_username or settings.admin_username, min_score]
 
         if search:
             query += " AND (candidate_name LIKE ? OR specialization LIKE ? OR technologies LIKE ?)"
@@ -342,13 +380,14 @@ def count_candidates(
     search: str = "",
     min_score: int = 0,
     experience_level: str = "",
+    owner_username: Optional[str] = None,
 ) -> int:
     """Count total candidates matching filters (for pagination metadata)."""
     with db_connection() as conn:
         cursor = conn.cursor()
 
-        query = "SELECT COUNT(*) FROM candidates WHERE overall_score >= ?"
-        params: list = [min_score]
+        query = "SELECT COUNT(*) FROM candidates WHERE owner_username = ? AND overall_score >= ?"
+        params: list = [owner_username or settings.admin_username, min_score]
 
         if search:
             query += " AND (candidate_name LIKE ? OR specialization LIKE ? OR technologies LIKE ?)"
@@ -363,52 +402,75 @@ def count_candidates(
         return cursor.fetchone()[0]
 
 
-def get_candidate(candidate_id: int, include_resume_text: bool = True) -> Optional[Dict]:
+def get_candidate(
+    candidate_id: int,
+    include_resume_text: bool = True,
+    owner_username: Optional[str] = None,
+) -> Optional[Dict]:
     """Get a single candidate by ID."""
     with db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM candidates WHERE id = ?", (candidate_id,))
+        cursor.execute(
+            "SELECT * FROM candidates WHERE id = ? AND owner_username = ?",
+            (candidate_id, owner_username or settings.admin_username),
+        )
         row = cursor.fetchone()
 
     return _row_to_dict(row, include_resume_text=include_resume_text) if row else None
 
 
-def delete_candidate(candidate_id: int) -> bool:
+def delete_candidate(candidate_id: int, owner_username: Optional[str] = None) -> bool:
     """Delete a candidate by ID. Returns True if deleted."""
     with db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM candidates WHERE id = ?", (candidate_id,))
+        cursor.execute(
+            "DELETE FROM candidates WHERE id = ? AND owner_username = ?",
+            (candidate_id, owner_username or settings.admin_username),
+        )
         return cursor.rowcount > 0
 
 
-def delete_all_candidates() -> int:
+def delete_all_candidates(owner_username: Optional[str] = None) -> int:
     """Delete all candidates. Returns count deleted."""
     with db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM candidates")
+        cursor.execute(
+            "DELETE FROM candidates WHERE owner_username = ?",
+            (owner_username or settings.admin_username,),
+        )
         return cursor.rowcount
 
 
 # ==================== JOB DESCRIPTION CRUD ====================
 
-def save_job_description(title: str, description: str) -> int:
+def save_job_description(
+    title: str,
+    description: str,
+    owner_username: Optional[str] = None,
+) -> int:
     """Save a job description. Returns the new ID."""
     with db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO job_descriptions (title, description) VALUES (?, ?)",
-            (title, description)
+            "INSERT INTO job_descriptions (owner_username, title, description) VALUES (?, ?, ?)",
+            (owner_username or settings.admin_username, title, description)
         )
         return cursor.lastrowid
 
 
-def get_job_descriptions() -> List[Dict]:
+def get_job_descriptions(owner_username: Optional[str] = None) -> List[Dict]:
     """Get all saved job descriptions."""
     with db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM job_descriptions ORDER BY created_at DESC")
+        cursor.execute(
+            "SELECT * FROM job_descriptions WHERE owner_username = ? ORDER BY created_at DESC",
+            (owner_username or settings.admin_username,),
+        )
         rows = cursor.fetchall()
-    return [dict(row) for row in rows]
+    return [
+        {key: value for key, value in dict(row).items() if key != "owner_username"}
+        for row in rows
+    ]
 
 
 # ==================== MATCH RESULTS ====================
@@ -436,23 +498,33 @@ def save_match_result(candidate_id: int, job_id: int, match_data: Dict) -> int:
 
 # ==================== STATISTICS ====================
 
-def get_stats() -> Dict:
+def get_stats(owner_username: Optional[str] = None) -> Dict:
     """Get dashboard statistics."""
     with db_connection() as conn:
         cursor = conn.cursor()
         stats = {}
 
+        owner = owner_username or settings.admin_username
+
         # Total candidates
-        cursor.execute("SELECT COUNT(*) FROM candidates")
+        cursor.execute(
+            "SELECT COUNT(*) FROM candidates WHERE owner_username = ?", (owner,)
+        )
         stats["total_candidates"] = cursor.fetchone()[0]
 
         # Average score
-        cursor.execute("SELECT AVG(overall_score) FROM candidates")
+        cursor.execute(
+            "SELECT AVG(overall_score) FROM candidates WHERE owner_username = ?",
+            (owner,),
+        )
         avg = cursor.fetchone()[0]
         stats["avg_score"] = round(avg, 1) if avg else 0
 
         # Top score
-        cursor.execute("SELECT MAX(overall_score) FROM candidates")
+        cursor.execute(
+            "SELECT MAX(overall_score) FROM candidates WHERE owner_username = ?",
+            (owner,),
+        )
         top = cursor.fetchone()[0]
         stats["top_score"] = top if top else 0
 
@@ -460,15 +532,19 @@ def get_stats() -> Dict:
         cursor.execute("""
             SELECT experience_level, COUNT(*) as count
             FROM candidates
+            WHERE owner_username = ?
             GROUP BY experience_level
-        """)
+        """, (owner,))
         stats["experience_distribution"] = {
             row["experience_level"] or "Unknown": row["count"]
             for row in cursor.fetchall()
         }
 
         # Top technologies
-        cursor.execute("SELECT technologies FROM candidates")
+        cursor.execute(
+            "SELECT technologies FROM candidates WHERE owner_username = ?",
+            (owner,),
+        )
         tech_count: Dict[str, int] = {}
         for row in cursor.fetchall():
             try:
@@ -486,9 +562,10 @@ def get_stats() -> Dict:
         cursor.execute("""
             SELECT specialization, COUNT(*) as count
             FROM candidates
+            WHERE owner_username = ?
             GROUP BY specialization
             ORDER BY count DESC
-        """)
+        """, (owner,))
         stats["specialization_distribution"] = {
             row["specialization"] or "Unknown": row["count"]
             for row in cursor.fetchall()
@@ -508,6 +585,7 @@ def _row_to_dict(row: sqlite3.Row, include_resume_text: bool = False) -> Dict:
         include_resume_text: If False (default), strip resume_text from result
     """
     d = dict(row)
+    d.pop("owner_username", None)
 
     # Parse JSON fields
     for field in ["technologies", "certifications", "soft_skills", "notable_achievements"]:
@@ -525,6 +603,29 @@ def _row_to_dict(row: sqlite3.Row, include_resume_text: bool = False) -> Dict:
     d.pop("experience_evidence", None)
 
     return d
+
+
+def create_user(username: str, password_hash: str) -> bool:
+    """Create a registered workspace account; raises on duplicate usernames."""
+    with db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+            (username, password_hash),
+        )
+        return cursor.rowcount == 1
+
+
+def get_user_by_username(username: str) -> Optional[Dict]:
+    """Get the credential record for authentication without exposing it via APIs."""
+    with db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT username, password_hash FROM users WHERE username = ?",
+            (username,),
+        )
+        row = cursor.fetchone()
+    return dict(row) if row else None
 
 
 # ==================== BACKUP UTILITIES ====================

@@ -13,7 +13,8 @@ This system includes production-ready security:
 | Feature | Description |
 |---|---|
 | 🔐 **JWT Authentication** | Token-based auth protects all sensitive endpoints |
-| 🛡️ **Rate Limiting** | DoS protection on uploads and job matching |
+| 👤 **Private Workspaces** | Publicly registered accounts can access only their own resume and job data |
+| 🛡️ **Rate Limiting** | Brute-force and abuse protection on login, signup, uploads, and job matching |
 | ✅ **PDF Validation** | Magic bytes, MIME type, size, and page count checks |
 | 🔑 **Non-Root Docker** | Container runs as unprivileged user |
 | 🔒 **Security Headers** | CSP, X-Frame-Options, HSTS |
@@ -44,7 +45,7 @@ Resume PDF → PyMuPDF → SpaCy NER + Regex → sentence-transformers Embedding
 | 📊 **Skill Gap Analysis** | Shows missing skills + learning resource suggestions |
 | 🏆 **Candidate Ranking** | Weighted scoring (0–100) with auto-ranking |
 | 🌐 **Web Dashboard** | Premium dark glassmorphism UI with charts |
-| 🗄️ **Persistent Storage** | SQLite — data survives restarts |
+| 🗄️ **Persistent Storage** | SQLite — persistence depends on the host's durable storage configuration |
 | 🐳 **Docker** | Containerized for consistent deployment |
 | ⚙️ **Ansible** | Server provisioning + app deployment playbooks |
 | 🏗️ **Terraform** | AWS infrastructure as code (EC2 + VPC + SG) |
@@ -97,7 +98,7 @@ python main.py
 Open: **http://localhost:8000**  
 API Docs: **http://localhost:8000/docs** (development only)
 
-Default login: `admin` / `admin123`
+For local development, the default login is `admin` / `admin123`. Public users can create a separate account from the sign-in page; each account has an isolated workspace. Change the default admin credentials before deploying.
 
 ### Option 3: Docker
 ```bash
@@ -169,6 +170,8 @@ The database is stored at `/app/backend/data/resume_db.sqlite` inside the contai
 volumes:
   - resume_data:/app/backend/data
 ```
+
+All user accounts, resumes, and job descriptions share this database file, with access scoped to each account. Existing records are assigned to the configured admin workspace when the ownership migration runs. On hosts with ephemeral filesystems (including a Render service without a persistent disk), accounts and uploaded data can be lost on restart or redeploy; attach durable storage or use a managed database before relying on persistence.
 
 ---
 
@@ -307,6 +310,7 @@ AI Resume Intelligence System 2.0/
 
 | Method | Endpoint | Description |
 |---|---|---|
+| POST | `/api/auth/register` | Create a private user workspace |
 | POST | `/api/auth/login` | Login and get JWT token |
 | GET | `/api/health` | Health check |
 | GET | `/api/readiness` | Readiness check |
@@ -323,6 +327,7 @@ AI Resume Intelligence System 2.0/
 | POST | `/api/job-match` | Semantic job matching |
 | GET | `/api/stats` | Dashboard statistics |
 | GET | `/api/export/{format}` | Export as JSON or CSV |
+| GET | `/api/job-descriptions` | List saved job descriptions in your workspace |
 | GET | `/api/auth/me` | Get current user info |
 
 ### Authentication

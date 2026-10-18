@@ -16,6 +16,7 @@ import os
 import csv
 import json
 import io
+import sqlite3
 from datetime import datetime, timezone
 from typing import List
 
@@ -30,9 +31,17 @@ from logging_config import get_logger, set_request_id, sanitize_error_message
 from auth import (
     require_auth,
     login,
+    hash_password,
+    ADMIN_USERNAME,
     add_security_headers,
 )
-from rate_limiter import rate_limit, upload_limiter, match_limiter
+from rate_limiter import (
+    rate_limit,
+    upload_limiter,
+    match_limiter,
+    login_limiter,
+    registration_limiter,
+)
 from validators import pdf_validator, sanitize_filename
 from pdf_extractor import extract_text_from_pdf
 from resume_analyzer import analyze_resume, calculate_candidate_score
@@ -44,11 +53,12 @@ from database import (
     save_job_description, get_job_descriptions,
     save_match_result, health_check as db_health_check,
     count_candidates,
+    create_user,
 )
 from models import (
     JobMatchRequest, StatsResponse,
     CandidateListResponse, HealthResponse, DeletionResponse,
-    LoginRequest, TokenResponse,
+    LoginRequest, RegistrationRequest, TokenResponse,
 )
 
 logger = get_logger(__name__)
@@ -173,7 +183,10 @@ async def readiness_check():
 # ==================== AUTHENTICATION ENDPOINTS ====================
 
 @app.post("/api/auth/login", response_model=TokenResponse)
-async def auth_login(request: LoginRequest):
+async def auth_login(
+    request: LoginRequest,
+    _: dict = Depends(rate_limit(login_limiter)),
+):
     """
     Authenticate and receive a JWT token.
     Rate-limited to prevent brute force attacks.
@@ -189,6 +202,29 @@ async def auth_login(request: LoginRequest):
         )
 
     logger.info(f"User logged in: {request.username}")
+    return result
+
+
+@app.post("/api/auth/register", response_model=TokenResponse, status_code=201)
+async def auth_register(
+    request: RegistrationRequest,
+    _: dict = Depends(rate_limit(registration_limiter)),
+):
+    """Create a standard user account with an isolated candidate workspace."""
+    if request.username.casefold() == ADMIN_USERNAME.casefold():
+        raise HTTPException(status_code=409, detail="Username is unavailable")
+
+    try:
+        create_user(request.username, hash_password(request.password))
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="Username is unavailable")
+
+    result = login(request.username, request.password)
+    if result is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Account created, but sign-in could not be completed. Please sign in.",
+        )
     return result
 
 
@@ -245,7 +281,7 @@ async def upload_resumes(
             analysis["resume_text"] = text  # Store for re-analysis
 
             # Save to database
-            candidate_id = save_candidate(analysis)
+            candidate_id = save_candidate(analysis, owner_username=user["sub"])
             analysis["id"] = candidate_id
 
             # Remove resume_text from response (privacy, size)
@@ -298,12 +334,14 @@ async def list_candidates(
         limit=limit,
         offset=offset,
         include_resume_text=False,
+        owner_username=user["sub"],
     )
 
     total = count_candidates(
         search=search,
         min_score=min_score,
         experience_level=experience_level,
+        owner_username=user["sub"],
     )
 
     return {
@@ -318,7 +356,7 @@ async def list_candidates(
 @app.post("/api/candidates/reprocess")
 async def reprocess_candidate_records(user: dict = Depends(require_auth)):
     """Safely refresh stored name and experience fields from saved resume text."""
-    total = count_candidates(min_score=-1)
+    total = count_candidates(min_score=-1, owner_username=user["sub"])
     updated = 0
     missing_source = 0
     failed = 0
@@ -329,6 +367,7 @@ async def reprocess_candidate_records(user: dict = Depends(require_auth)):
             limit=200,
             offset=offset,
             include_resume_text=True,
+            owner_username=user["sub"],
         )
         for candidate in candidates:
             try:
@@ -337,7 +376,9 @@ async def reprocess_candidate_records(user: dict = Depends(require_auth)):
                     analysis = analyze_resume(
                         resume_text, candidate.get("filename", "")
                     )
-                    update_candidate_reanalysis(candidate["id"], analysis)
+                    update_candidate_reanalysis(
+                        candidate["id"], analysis, owner_username=user["sub"]
+                    )
                     updated += 1
                     continue
 
@@ -365,7 +406,9 @@ async def reprocess_candidate_records(user: dict = Depends(require_auth)):
                     "name_evidence": {"status": "source_unavailable"},
                     "experience_evidence": [],
                 }
-                update_candidate_reanalysis(candidate["id"], analysis)
+                update_candidate_reanalysis(
+                    candidate["id"], analysis, owner_username=user["sub"]
+                )
                 updated += 1
             except Exception as e:
                 failed += 1
@@ -400,7 +443,9 @@ async def get_single_candidate(
 
     Requires authentication.
     """
-    candidate = get_candidate(candidate_id, include_resume_text=False)
+    candidate = get_candidate(
+        candidate_id, include_resume_text=False, owner_username=user["sub"]
+    )
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
     return candidate
@@ -416,7 +461,7 @@ async def remove_candidate(
 
     Requires authentication.
     """
-    if delete_candidate(candidate_id):
+    if delete_candidate(candidate_id, owner_username=user["sub"]):
         logger.info(f"Candidate {candidate_id} deleted by {user.get('sub')}")
         return {"message": "Candidate deleted", "id": candidate_id}
     raise HTTPException(status_code=404, detail="Candidate not found")
@@ -430,7 +475,7 @@ async def remove_all_candidates(user: dict = Depends(require_auth)):
     Requires authentication.
     This is a destructive operation.
     """
-    count = delete_all_candidates()
+    count = delete_all_candidates(owner_username=user["sub"])
     logger.warning(f"All candidates ({count}) deleted by {user.get('sub')}")
     return {"message": f"Deleted {count} candidate(s)", "count": count}
 
@@ -453,7 +498,9 @@ async def job_match(
     Note: Match scores are similarity estimates, not probabilities of hiring success.
     """
     # Get all candidates from database (without resume_text for matching)
-    candidates = get_all_candidates(include_resume_text=False)
+    candidates = get_all_candidates(
+        include_resume_text=False, owner_username=user["sub"]
+    )
     if not candidates:
         raise HTTPException(
             status_code=400,
@@ -461,7 +508,9 @@ async def job_match(
         )
 
     # Save job description
-    jd_id = save_job_description(request.job_title, request.job_description)
+    jd_id = save_job_description(
+        request.job_title, request.job_description, owner_username=user["sub"]
+    )
 
     # Rank candidates against JD
     try:
@@ -503,7 +552,7 @@ async def dashboard_stats(user: dict = Depends(require_auth)):
 
     Requires authentication.
     """
-    return get_stats()
+    return get_stats(owner_username=user["sub"])
 
 
 # ==================== EXPORT (PROTECTED) ====================
@@ -519,7 +568,9 @@ async def export_candidates(
     Requires authentication.
     Exports personal data (names, emails, phones).
     """
-    candidates = get_all_candidates(include_resume_text=False)
+    candidates = get_all_candidates(
+        include_resume_text=False, owner_username=user["sub"]
+    )
 
     if format.lower() == "csv":
         # Generate CSV
@@ -574,7 +625,7 @@ async def list_job_descriptions(user: dict = Depends(require_auth)):
 
     Requires authentication.
     """
-    jds = get_job_descriptions()
+    jds = get_job_descriptions(owner_username=user["sub"])
     return {"total": len(jds), "job_descriptions": jds}
 
 
