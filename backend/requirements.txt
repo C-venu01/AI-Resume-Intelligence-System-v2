@@ -10,7 +10,7 @@ python-multipart==0.0.20
 PyMuPDF==1.25.5
 
 # NLP
-spacy==3.8.4
+spacy>=3.7,<3.9
 
 # AI Embeddings
 sentence-transformers==3.4.1

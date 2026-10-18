@@ -1,10 +1,30 @@
-# Render.com deployment configuration
-# Automatically builds and deploys the Dockerfile in the repository.
-
 services:
   - type: web
-    name: resume-intelligence
-    env: docker
-    dockerfilePath: ./Dockerfile
+    name: ai-resume-backend
+    env: python
+    buildCommand: cd backend && pip install -r requirements.txt
+    startCommand: cd backend && python main.py
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: ADMIN_PASSWORD_HASH
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: https://ai-resume-intelligence-system-v2.vercel.app
+      - key: DATABASE_PATH
+        value: /tmp/resume_db.sqlite
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+      - key: MAX_FILE_SIZE_MB
+        value: "10"
+      - key: MAX_BATCH_SIZE
+        value: "20"
+      - key: PROMETHEUS_ENABLED
+        value: "false"
+    healthCheckPath: /api/health
+    instances: 1
+    memory: 512
     plan: free
-    autoDeploy: true
+    diskSize: 1

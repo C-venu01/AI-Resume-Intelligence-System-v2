@@ -5,18 +5,25 @@ Uses SpaCy for Named Entity Recognition and regex for pattern matching.
 """
 
 import re
-import spacy
 from typing import Dict, List, Optional
 
 # ==================== LOAD SPACY MODEL ====================
 # We use en_core_web_sm — lightweight but effective for NER
+# Falls back to regex-only extraction if SpaCy is unavailable
 try:
-    nlp = spacy.load("en_core_web_sm")
-except OSError:
-    print("[Analyzer] SpaCy model not found. Downloading en_core_web_sm...")
-    from spacy.cli import download
-    download("en_core_web_sm")
-    nlp = spacy.load("en_core_web_sm")
+    import spacy
+    try:
+        nlp = spacy.load("en_core_web_sm")
+    except OSError:
+        print("[Analyzer] SpaCy model not found. Downloading en_core_web_sm...")
+        from spacy.cli import download
+        download("en_core_web_sm")
+        nlp = spacy.load("en_core_web_sm")
+    SPACY_AVAILABLE = True
+except ImportError:
+    nlp = None
+    SPACY_AVAILABLE = False
+    print("[Analyzer] SpaCy not installed. Using regex-only extraction (name detection may be less accurate).")
 
 
 # ==================== TECHNOLOGY DATABASE ====================
@@ -173,7 +180,7 @@ def analyze_resume(text: str, filename: str = "") -> Dict:
     """
     try:
         text_lower = text.lower()
-        doc = nlp(text)
+        doc = nlp(text) if SPACY_AVAILABLE else None
 
         # Extract all fields
         name = _extract_name(doc, text)
@@ -278,11 +285,12 @@ def _extract_name(doc, text: str) -> str:
         return True
     
     # Strategy 1: SpaCy NER — find PERSON entities
-    for ent in doc.ents:
-        if ent.label_ == "PERSON":
-            name = ent.text.strip()
-            if is_valid_name(name):
-                return name
+    if doc is not None:
+        for ent in doc.ents:
+            if ent.label_ == "PERSON":
+                name = ent.text.strip()
+                if is_valid_name(name):
+                    return name
     
     # Strategy 2: First few lines — resumes typically start with the name
     lines = [l.strip() for l in text.split('\n') if l.strip()]
